@@ -61,7 +61,7 @@ ibge_to_nome = {
 }
 nome_to_ibge = {v: k for k, v in ibge_to_nome.items()}
 all_municipios_names = list(ibge_to_nome.values())
-available_years = list(range(2010, 2022))
+available_years = list(range(2020, 2021))
 
 interpretacoes = {
     "A1_PIB per Capita": "Renda média por habitante", "A2_Receita Total per Capita": "Arrecadação por habitante",
