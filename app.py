@@ -307,10 +307,9 @@ st.sidebar.header("Passo a Passo da Análise")
 # --------------------------
 st.sidebar.markdown("### 1. Carregar Dados Iniciais")
 if st.sidebar.button("Carregar Dados de PIB e População"):
-    # Caminhos para os arquivos Excel. Ajuste esses caminhos se os arquivos
-    # estiverem em um subdiretório do seu repositório.
-    pib_file_path = 'PIB dos Municípios - base de dados 2010-2021.xlsx'
-    pop_file_path = 'POP_2022_Municipios.xlsx'
+    # Caminhos CORRIGIDOS para a estrutura de pastas 'data/'
+    pib_file_path = 'data/PIB dos Municípios - base de dados 2010-2021.xlsx'
+    pop_file_path = 'data/POP_2022_Municipios.xlsx'
 
     st.session_state.pib_data = load_pib_data(pib_file_path)
     st.session_state.pop_data = load_pop_data(pop_file_path)
