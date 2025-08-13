@@ -6,7 +6,7 @@ import os
 
 # --- Configurações da Página Streamlit ---
 st.set_page_config(
-    page_title="Análise de Índices Municipais",
+    page_title="Indicadores Contábeis",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -301,11 +301,15 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
 
 # --- Layout do Aplicativo Streamlit ---
 
-st.title("📊 Análise de Índices Financeiros Municipais")
+st.title("📊 Análise dos Indicadores Fiscais, Orçamentários e Contábeis")
 
 st.markdown("""
-Esta ferramenta permite analisar **índices patrimoniais, orçamentários e de liquidez** para municípios selecionados. 
-Siga os passos na barra lateral para começar.
+Esta ferramenta tem o objetivo de analisar a gestão fiscal dos cinco maiores municípios fluminenses, com base na população estimada 
+            em 2021, avaliando seus principais indicadores fiscais, orçamentários e contábeis. 
+             
+A análise é feita por meio de indicadores como PIB per capita, despesa orçamentária, arrecadação tributária e liquidez, de modo a 
+            identificar padrões de eficiência e desafios estruturais recorrentes na gestão pública municipal.
+
 """)
 
 st.sidebar.header("Passo a Passo da Análise")
