@@ -6,13 +6,12 @@ import os
 
 # --- Configurações da Página Streamlit ---
 st.set_page_config(
-    page_title="Indicadores Contábeis",
+    page_title="Análise de Índices Municipais",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --- Inicialização do estado da sessão para controlar o fluxo do app ---
-# Usamos st.session_state para armazenar dados e o estado da aplicação entre as interações.
 if 'pib_pop_loaded' not in st.session_state:
     st.session_state.pib_pop_loaded = False
 if 'siconfi_loaded' not in st.session_state:
@@ -23,7 +22,6 @@ if 'pib_data' not in st.session_state:
     st.session_state.pib_data = pd.DataFrame()
 if 'pop_data' not in st.session_state:
     st.session_state.pop_data = pd.DataFrame()
-
 
 # --- Funções para Carregamento de Dados (com cache) ---
 @st.cache_data
@@ -55,7 +53,6 @@ def load_pop_data(file_path):
     except FileNotFoundError:
         st.error(f"Erro: Arquivo '{file_path}' não encontrado. Por favor, verifique o caminho.")
         return pd.DataFrame()
-
 
 # --- Mapeamentos e Dicionários para Análise ---
 ibge_to_nome = {
@@ -206,7 +203,6 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
         oper_cred = get_value_or_zero(df_rreo_1, 'coluna == "Até o Bimestre (c)" & cod_conta == "ReceitasDeOperacoesDeCredito"')
         juros_e_encargos_div = get_value_or_zero(df_rreo_1, 'coluna == "DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)" & cod_conta == "JurosEEncargosDaDivida"')
         
-        # --- Calcular indicadores (com tratamento para divisão por zero) ---
         def safe_division(numerator, denominator):
             return numerator / denominator if denominator != 0 else 0
 
@@ -244,7 +240,6 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
         amortizacao_e_refinanc_div = safe_division(oper_cred, despesa_total) * 100
         encargos_div_dps_corr = safe_division(juros_e_encargos_div, despesa_total) * 100
         
-        # Adicionar à lista de resultados
         resultados.append({
             "Município": ente, "A1_PIB per Capita": pib_per_capita, "A2_Receita Total per Capita": receita_total_per_capita,
             "A3_IPTU per Capita": iptu_per_capita, "A4_ISS per Capita": iss_per_capita,
@@ -263,10 +258,8 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
             "G2_Grau de Investimento em relação a Despesa Orçamentária": gasto_invest_dps_orcam,
             "G3_Grau de Gasto com Pessoal em relação a Receita corrente Líquida": gasto_pessoal_rcl,
             "G4_Grau de Receitas Correntes Próprias ": rec_corr_proprias,
-            "H1_Grau de Execução Orçamentária da Receita": exec_orcam_rec,
-            "H2_Grau de Execução Orçamentária da Despesa": exec_orcam_desp,
-            "H3_Grau do Resultado da Execução Orçamentária": resultado_exec_orcam,
-            "H4_Grau de Autonomia Orçamentária": autonomia_orcam,
+            "H1_Grau de Execução Orçamentária da Receita": exec_orcam_rec, "H2_Grau de Execução Orçamentária da Despesa": exec_orcam_desp,
+            "H3_Grau do Resultado da Execução Orçamentária": resultado_exec_orcam, "H4_Grau de Autonomia Orçamentária": autonomia_orcam,
             "H5_Grau de Amortização e refinanciamento de dívida": amortizacao_e_refinanc_div,
             "H6_Grau de Encargos da dívida na despesa corrente": encargos_div_dps_corr,
         })
@@ -302,14 +295,9 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
 # --- Layout do Aplicativo Streamlit ---
 
 st.title("📊 Análise dos Indicadores Fiscais, Orçamentários e Contábeis")
-
 st.markdown("""
-Esta ferramenta tem o objetivo de analisar a gestão fiscal dos cinco maiores municípios fluminenses, com base na população estimada 
-            em 2021, avaliando seus principais indicadores fiscais, orçamentários e contábeis. 
-             
-A análise é feita por meio de indicadores como PIB per capita, despesa orçamentária, arrecadação tributária e liquidez, de modo a 
-            identificar padrões de eficiência e desafios estruturais recorrentes na gestão pública municipal.
-
+Esta ferramenta tem o objetivo de analisar a gestão fiscal dos cinco maiores municípios fluminenses, com base na população estimada em 2021, avaliando seus principais indicadores fiscais, orçamentários e contábeis.
+A análise é feita por meio de indicadores como PIB per capita, despesa orçamentária, arrecadação tributária e liquidez, de modo a identificar padrões de eficiência e desafios estruturais recorrentes na gestão pública municipal.
 """)
 
 st.sidebar.header("Passo a Passo da Análise")
@@ -319,8 +307,14 @@ st.sidebar.header("Passo a Passo da Análise")
 # --------------------------
 st.sidebar.markdown("### 1. Carregar Dados Iniciais")
 if st.sidebar.button("Carregar Dados de PIB e População"):
-    st.session_state.pib_data = load_pib_data('PIB dos Municípios - base de dados 2010-2021.xlsx')
-    st.session_state.pop_data = load_pop_data('POP_2022_Municipios.xlsx')
+    # Caminhos para os arquivos Excel. Ajuste esses caminhos se os arquivos
+    # estiverem em um subdiretório do seu repositório.
+    pib_file_path = 'PIB dos Municípios - base de dados 2010-2021.xlsx'
+    pop_file_path = 'POP_2022_Municipios.xlsx'
+
+    st.session_state.pib_data = load_pib_data(pib_file_path)
+    st.session_state.pop_data = load_pop_data(pop_file_path)
+
     if not st.session_state.pib_data.empty and not st.session_state.pop_data.empty:
         st.session_state.pib_pop_loaded = True
         st.sidebar.success("Dados de PIB e População carregados!")
