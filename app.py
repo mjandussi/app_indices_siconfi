@@ -3,6 +3,8 @@ import pandas as pd
 import requests
 import time
 import os
+import numpy as np
+from io import BytesIO
 
 # --- Configurações da Página Streamlit ---
 st.set_page_config(
@@ -53,6 +55,102 @@ def load_pop_data(file_path):
     except FileNotFoundError:
         st.error(f"Erro: Arquivo '{file_path}' não encontrado. Por favor, verifique o caminho.")
         return pd.DataFrame()
+
+
+##### FUNÇÕES DE FORMATAÇÃO #####
+
+def fmt_br_num(x, casas=2):
+    """Formata número no padrão BR: 1.234,56"""
+    if x is None or (isinstance(x, float) and np.isnan(x)) or pd.isna(x):
+        return ""
+    try:
+        x = float(x)
+    except Exception:
+        return str(x)
+    s = f"{x:,.{casas}f}"  # 1,234.56
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+def fmt_br_int(x):
+    """Inteiro no padrão BR (sem casas)."""
+    if x is None or (isinstance(x, float) and np.isnan(x)) or pd.isna(x):
+        return ""
+    try:
+        return fmt_br_num(int(round(float(x))), casas=0)
+    except Exception:
+        return str(x)
+
+def fmt_br_pct(x, casas=2):
+    """Percentual no padrão BR, assumindo x em 0..100."""
+    if x is None or (isinstance(x, float) and np.isnan(x)) or pd.isna(x):
+        return ""
+    try:
+        x = float(x)
+    except Exception:
+        return str(x)
+    return f"{fmt_br_num(x, casas=casas)}%"
+
+def build_br_formatters(df: pd.DataFrame):
+    """
+    Monta dict de formatadores por coluna:
+    - colunas numéricas: BR 2 casas
+    - variação: BR + %
+    - classificação/ano: inteiro
+    """
+    fmt = {}
+    for col in df.columns:
+        if col == "Ano":
+            fmt[col] = fmt_br_int
+        elif "Classificação" in col:
+            fmt[col] = fmt_br_int
+        elif "Variação (%)" in col:
+            fmt[col] = fmt_br_pct
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            fmt[col] = fmt_br_num
+    return fmt
+
+def style_table(df: pd.DataFrame):
+    """
+    Estilo visual:
+    - números alinhados à direita
+    - índice e textos alinhados à esquerda
+    - zebra stripes
+    - cabeçalho destacado
+    - quebra de linha em colunas de texto
+    """
+    styler = (
+        df.style
+        .set_properties(**{"text-align": "right"}, subset=df.select_dtypes(include="number").columns)
+        .set_properties(**{"text-align": "left"}, subset=[c for c in df.columns if c not in df.select_dtypes(include="number").columns])
+        .set_table_styles([
+            {"selector": "th", "props": [("text-align", "left"), ("font-weight", "700")]},
+            {"selector": "td", "props": [("vertical-align", "top")]},
+        ])
+        .set_table_styles(
+            [
+                {"selector": "thead th", "props": [("position", "sticky"), ("top", "0"), ("background", "#111827")]},
+                {"selector": "tbody tr:nth-child(even)", "props": [("background", "rgba(255,255,255,0.03)")]},
+            ],
+            overwrite=False
+        )
+    )
+    return styler
+
+
+from io import BytesIO
+
+def gerar_excel_download(df: pd.DataFrame):
+    """
+    Gera arquivo Excel em memória para download.
+    Mantém os valores numéricos originais.
+    """
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Indicadores', index=True)
+    
+    output.seek(0)
+    return output
+
 
 # --- Mapeamentos e Dicionários para Análise ---
 ibge_to_nome = {
@@ -300,14 +398,21 @@ Esta ferramenta tem o objetivo de analisar a gestão fiscal dos cinco maiores mu
 A análise é feita por meio de indicadores como PIB per capita, despesa orçamentária, arrecadação tributária e liquidez, de modo a identificar padrões de eficiência e desafios estruturais recorrentes na gestão pública municipal.
 """)
 
-st.sidebar.header("Passo a Passo da Análise")
+st.markdown("---")
 
-# --------------------------
-# Passo 1: Carregar Dados Locais
-# --------------------------
-st.sidebar.markdown("### 1. Carregar Dados Iniciais")
-if st.sidebar.button("Carregar Dados de PIB e População"):
-    # Caminhos CORRIGIDOS para a estrutura de pastas 'data/'
+# =========================
+# 1) CARREGAR DADOS (NA PÁGINA)
+# =========================
+st.subheader("1) Carregar dados locais (PIB e População)")
+
+col_a, col_b = st.columns([1, 2])
+with col_a:
+    carregar = st.button("📥 Carregar Dados de PIB e População", use_container_width=True)
+
+with col_b:
+    st.caption("Primeiro carregue os dados de PIB e População.")
+
+if carregar:
     pib_file_path = 'data/PIB dos Municípios - base de dados 2010-2021.xlsx'
     pop_file_path = 'data/POP_2022_Municipios.xlsx'
 
@@ -316,80 +421,139 @@ if st.sidebar.button("Carregar Dados de PIB e População"):
 
     if not st.session_state.pib_data.empty and not st.session_state.pop_data.empty:
         st.session_state.pib_pop_loaded = True
-        st.sidebar.success("Dados de PIB e População carregados!")
+        st.success("✅ Dados de PIB e População carregados com sucesso!")
     else:
         st.session_state.pib_pop_loaded = False
-        st.sidebar.error("Falha ao carregar arquivos. Verifique os caminhos.")
+        st.error("❌ Falha ao carregar os arquivos. Verifique os caminhos e a pasta `data/`.")
 
 if not st.session_state.pib_pop_loaded:
-    st.warning("⚠️ **Passo 1:** Carregue os dados de PIB e População clicando no botão ao lado.")
-else:
-    st.success("✅ **Passo 1:** Dados de PIB e População carregados com sucesso!")
-    
-    # --------------------------
-    # Passo 2: Seleção de Parâmetros
-    # --------------------------
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 2. Selecionar Parâmetros")
-    selected_year = st.sidebar.selectbox(
-        "Selecione o Ano de Análise",
+    st.warning("⚠️ Para continuar, carregue os dados de PIB e População acima.")
+    st.stop()
+
+st.markdown("---")
+
+# =========================
+# 2) PARÂMETROS (NA PÁGINA)
+# =========================
+st.subheader("2) Selecionar parâmetros")
+
+c1, c2 = st.columns([1, 3])
+with c1:
+    selected_year = st.selectbox(
+        "Ano de análise",
         options=available_years,
         index=len(available_years) - 1
     )
-    selected_municipios_names = st.sidebar.multiselect(
-        "Selecione os Municípios para Análise",
+
+with c2:
+    selected_municipios_names = st.multiselect(
+        "Municípios",
         options=all_municipios_names,
         default=all_municipios_names
     )
-    selected_entes_ids = [nome_to_ibge[name] for name in selected_municipios_names]
 
-    # --------------------------
-    # Passo 3: Gerar Análise
-    # --------------------------
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 3. Gerar Análise")
-    if st.sidebar.button("Gerar Análise dos Índices SICONFI"):
-        if not selected_entes_ids:
-            st.warning("Por favor, selecione pelo menos um município para análise.")
-        else:
-            final_table = calculate_municipal_indices(
-                selected_year, selected_entes_ids, st.session_state.pib_data, st.session_state.pop_data
-            )
-            st.session_state.final_table = final_table
-            st.session_state.siconfi_loaded = True
-    
-    # --------------------------
-    # Exibição dos Resultados Finais
-    # --------------------------
-    if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
-        st.markdown("---")
-        st.success("✅ **Passo 3:** Análise de índices gerada com sucesso!")
-        st.subheader(f"Resultados dos Índices para o Ano {selected_year}")
-        st.dataframe(
-            st.session_state.final_table.style.format(
-                {col: "{:.2f}" for col in st.session_state.final_table.select_dtypes(include='number').columns 
-                 if 'Variação' not in col and 'Classificação' not in col}
-            ),
-            use_container_width=True
+selected_entes_ids = [nome_to_ibge[name] for name in selected_municipios_names]
+
+st.markdown("---")
+
+# =========================
+# 3) GERAR ANÁLISE (NA PÁGINA)
+# =========================
+st.subheader("3) Gerar Análise das Demonstrações Contábeis das cinco maiores cidades do Estado do Rio de Janeiro")
+
+gerar = st.button("⚙️ Gerar Análise", type="primary", use_container_width=True)
+
+if gerar:
+    if not selected_entes_ids:
+        st.warning("Selecione pelo menos um município para análise.")
+    else:
+        final_table = calculate_municipal_indices(
+            selected_year,
+            selected_entes_ids,
+            st.session_state.pib_data,
+            st.session_state.pop_data
         )
+        st.session_state.final_table = final_table
+        st.session_state.siconfi_loaded = True
 
-        st.markdown("---")
-        st.subheader("Glossário e Classificação")
-        st.markdown("""
-        **Variação (%):** Diferença percentual do índice do município em relação à média dos municípios selecionados.
-        **Classificação:**
-        * **1:** Variação absoluta $\\le 10\\%$ da média.
-        * **2:** Variação absoluta entre $10\\%$ e $30\\%$ da média.
-        * **3:** Variação absoluta $> 30\\%$ da média.
-        """)
-        
-    elif st.session_state.pib_pop_loaded:
-         st.info("ℹ️ **Passo 2 e 3:** Selecione o ano e os municípios na barra lateral e clique em 'Gerar Análise'.")
+# =========================
+# RESULTADOS
+# =========================
+if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
+    st.markdown("---")
+    st.success("✅ Análise de índices gerada com sucesso!")
+    st.subheader(f"Resultados dos Índices para o Ano {selected_year}")
+
+    df_show = st.session_state.final_table.copy()
+
+    # Reorganiza colunas: municípios + média; depois variações; depois textos; depois ano
+    municipios = [c for c in df_show.columns if c in ibge_to_nome.values()]
+    variacoes  = [c for c in df_show.columns if "Variação (%)" in c]
+    classes    = [c for c in df_show.columns if "Classificação" in c]
+    textos     = [c for c in ["Interpretações", "Fórmulas"] if c in df_show.columns]
+    resto      = [c for c in df_show.columns if c not in (municipios + ["Média"] + variacoes + classes + textos + ["Ano"])]
+
+    ordem = []
+    if municipios: ordem += municipios
+    if "Média" in df_show.columns: ordem += ["Média"]
+    ordem += variacoes + classes
+    ordem += textos
+    if "Ano" in df_show.columns: ordem += ["Ano"]
+    ordem += resto
+
+    df_show = df_show[ordem]
+
+    # Garante numéricos "limpos" (evita inf, -inf)
+    num_cols = df_show.select_dtypes(include="number").columns
+    df_show[num_cols] = (
+        df_show[num_cols]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+
+    # Formatação BR + estilo
+    fmt = build_br_formatters(df_show)
+    styler = style_table(df_show).format(fmt)
+
+    st.dataframe(
+        styler,
+        use_container_width=True,
+        height=650
+    )
+
+    # ======================
+    # EXPORTAR PARA EXCEL
+    # ======================
+    excel_file = gerar_excel_download(st.session_state.final_table)
+
+    st.download_button(
+        label="📥 Exportar tabela para Excel",
+        data=excel_file,
+        file_name=f"Indicadores_Municipais_{selected_year}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
+    # ======================
+    # Rodapé
+    # ======================
+
+    st.markdown("---")
+    st.subheader("Glossário e Classificação")
+    st.markdown(r"""
+**Variação (%):** Diferença percentual do índice do município em relação à média dos municípios selecionados.  
+**Classificação:**
+* **1:** Variação absoluta $\le 10\%$ da média.
+* **2:** Variação absoluta entre $10\%$ e $30\%$ da média.
+* **3:** Variação absoluta $> 30\%$ da média.
+""")
+else:
+    st.info("ℹ️ Selecione ano e municípios e clique em **Gerar Análise**.")
 
 st.markdown("---")
 st.info("""
 **Observação:**
-* Os arquivos `PIB dos Municípios - base de dados 2010-2021.xlsx` e `POP_2022_Municipios.xlsx` devem estar no mesmo diretório do script.
+* Os arquivos `PIB dos Municípios - base de dados 2010-2021.xlsx` e `POP_2022_Municipios.xlsx` devem estar na pasta `data/`.
 * A aplicação usa cache para acelerar o carregamento dos dados após a primeira execução.
 * Divisão por zero em cálculos é tratada para evitar erros.
 """)
