@@ -1,0 +1,26 @@
+cod_ibge,ano,pop,agregado_x,variavel_x,pib_total,agregado_y,variavel_y,_merge,pib_per_capita_calc
+3301009,2020,511168.0,9324.0,População residente estimada,23852870.0,37.0,Produto Interno Bruto a preços correntes,both,46.66346484912984
+3301009,2021,514643.0,9324.0,População residente estimada,37179716.0,37.0,Produto Interno Bruto a preços correntes,both,72.24370291639059
+3301009,2022,,,,49942074.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3301009,2023,,,,42953469.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3301009,2024,519011.0,9324.0,População residente estimada,,,,left_only,
+3301702,2020,924624.0,9324.0,População residente estimada,47194544.0,37.0,Produto Interno Bruto a preços correntes,both,51.04187648168337
+3301702,2021,929449.0,9324.0,População residente estimada,53136504.0,37.0,Produto Interno Bruto a preços correntes,both,57.16989743385597
+3301702,2022,,,,65861333.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3301702,2023,,,,70068007.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3301702,2024,866347.0,9324.0,População residente estimada,,,,left_only,
+3303500,2020,823302.0,9324.0,População residente estimada,17210824.0,37.0,Produto Interno Bruto a preços correntes,both,20.90463037864599
+3303500,2021,825388.0,9324.0,População residente estimada,17794452.0,37.0,Produto Interno Bruto a preços correntes,both,21.55889351432296
+3303500,2022,,,,19911894.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3303500,2023,,,,20518624.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3303500,2024,843046.0,9324.0,População residente estimada,,,,left_only,
+3304557,2020,6747815.0,9324.0,População residente estimada,331471515.0,37.0,Produto Interno Bruto a preços correntes,both,49.122792340928136
+3304557,2021,6775561.0,9324.0,População residente estimada,359632648.0,37.0,Produto Interno Bruto a preços correntes,both,53.077914581537975
+3304557,2022,,,,380381515.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3304557,2023,,,,418462360.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3304557,2024,6729894.0,9324.0,População residente estimada,,,,left_only,
+3304904,2020,1091737.0,9324.0,População residente estimada,19009507.0,37.0,Produto Interno Bruto a preços correntes,both,17.412167032902612
+3304904,2021,1098357.0,9324.0,População residente estimada,20324752.0,37.0,Produto Interno Bruto a preços correntes,both,18.50468654544925
+3304904,2022,,,,20561718.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3304904,2023,,,,23063689.0,37.0,Produto Interno Bruto a preços correntes,right_only,
+3304904,2024,960652.0,9324.0,População residente estimada,,,,left_only,

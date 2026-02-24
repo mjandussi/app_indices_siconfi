@@ -41,64 +41,20 @@ def load_pib_data(file_path):
         st.error(f"Erro: Arquivo '{file_path}' não encontrado. Por favor, verifique o caminho.")
         return pd.DataFrame()
 
-
 @st.cache_data
-def load_pop_data(file_path: str, ano_pop_assumido: int = 2021):
-    xls = pd.ExcelFile(file_path)
-
-    # tenta achar a aba que tem municípios
-    sheet_ok = None
-    df = None
-
-    for sh in xls.sheet_names:
-        # header=1 porque a linha 0 é título no layout do IBGE
-        tmp = pd.read_excel(file_path, sheet_name=sh, header=1, dtype=object)
-        tmp.columns = tmp.columns.astype(str).str.strip()
-
-        cols_upper = [c.upper() for c in tmp.columns]
-        tem_cod_uf = any("COD. UF" in c for c in cols_upper)
-        tem_cod_mun = any("COD. MUNIC" in c for c in cols_upper)
-        tem_pop = any("POP" in c for c in cols_upper)
-
-        if tem_cod_uf and tem_cod_mun and tem_pop:
-            sheet_ok = sh
-            df = tmp
-            break
-
-    if df is None:
-        raise ValueError(
-            f"Não achei uma aba com colunas de município (COD. UF, COD. MUNIC e POP...). "
-            f"Abas encontradas: {xls.sheet_names}"
-        )
-
-    # padroniza nomes
-    df.columns = df.columns.astype(str).str.strip()
-
-    # pega nomes reais das colunas (pra funcionar mesmo se variar um pouco)
-    col_uf = next(c for c in df.columns if "COD. UF" in c.upper())
-    col_mun = next(c for c in df.columns if "COD. MUNIC" in c.upper())
-    col_pop = next(c for c in df.columns if "POP" in c.upper())
-
-    # limpa e monta cod_ibge
-    def to_str_ibge(x):
-        if pd.isna(x):
-            return ""
-        s = str(x).strip()
-        s = s.replace(".0", "")  # caso venha como 33.0
-        return s
-
-    df[col_uf] = df[col_uf].apply(to_str_ibge).str.zfill(2)
-    df[col_mun] = df[col_mun].apply(to_str_ibge).str.zfill(5)
-
-    df["cod_ibge"] = df[col_uf] + df[col_mun]
-    df["POPULAÇÃO"] = pd.to_numeric(df[col_pop], errors="coerce")
-    df["Ano"] = int(ano_pop_assumido)
-
-    # mantém só linhas válidas (evita rodapé/notas)
-    df = df[df["cod_ibge"].str.match(r"^\d{7}$", na=False)]
-    df = df.dropna(subset=["POPULAÇÃO"])
-
-    return df[["cod_ibge", "Ano", "POPULAÇÃO"]]
+def load_pop_data(file_path):
+    """Carrega e pré-processa os dados de População."""
+    try:
+        populacao = pd.read_excel(file_path, header=1, dtype=object)
+        populacao.drop(populacao.tail(35).index, inplace=True)
+        populacao['POPULAÇÃO'] = pd.to_numeric(populacao['POPULAÇÃO'], errors='coerce')
+        populacao['COD. UF'] = populacao['COD. UF'].astype(str)
+        populacao['COD. MUNIC'] = populacao['COD. MUNIC'].astype(str)
+        populacao['cod_ibge'] = populacao['COD. UF'] + populacao['COD. MUNIC']
+        return populacao
+    except FileNotFoundError:
+        st.error(f"Erro: Arquivo '{file_path}' não encontrado. Por favor, verifique o caminho.")
+        return pd.DataFrame()
 
 
 ##### FUNÇÕES DE FORMATAÇÃO #####
@@ -296,8 +252,7 @@ def calculate_municipal_indices(ano, selected_entes_ids, df_ibge_data, populacao
 
         # --- Filtrar dados do PIB e População para o ente e ano atuais ---
         pib_munic = df_ibge_data.query(f'`Código do Município` == {ente} and Ano == {ano}')
-        #nro_habitantes_df = populacao_data.query(f'cod_ibge == "{ente}"')
-        nro_habitantes_df = populacao_data.query(f'cod_ibge == "{ente}" and Ano == {ano}')
+        nro_habitantes_df = populacao_data.query(f'cod_ibge == "{ente}"')
 
         # --- Extrair valores, tratando casos onde o DataFrame pode estar vazio ---
         def get_value(df, column):
@@ -459,11 +414,10 @@ with col_b:
 
 if carregar:
     pib_file_path = 'data/PIB dos Municípios - base de dados 2010-2021.xlsx'
-    pop_file_path = 'data/POP_2021_Municipios.xlsx'
+    pop_file_path = 'data/POP_2022_Municipios.xlsx'
 
     st.session_state.pib_data = load_pib_data(pib_file_path)
-    #st.session_state.pop_data = load_pop_data(pop_file_path)
-    st.session_state.pop_data = load_pop_data(pop_file_path, ano_pop_assumido=2021)
+    st.session_state.pop_data = load_pop_data(pop_file_path)
 
     if not st.session_state.pib_data.empty and not st.session_state.pop_data.empty:
         st.session_state.pib_pop_loaded = True
