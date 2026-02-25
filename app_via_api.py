@@ -117,7 +117,7 @@ nome_to_ibge = {v: k for k, v in ibge_to_nome.items()}
 all_municipios_names = list(ibge_to_nome.values())
 
 # anos SICONFI (você pode ampliar; o app vai lidar com ausência de PIB em certos anos)
-available_years = list(range(2020, 2026))
+available_years = list(range(2020, 2025))
 
 
 interpretacoes = {
@@ -198,17 +198,19 @@ formulas = {
 # =========================================================
 IBGE_AGREGADOS_BASE = "https://servicodados.ibge.gov.br/api/v3/agregados"
 
-# Valores “típicos” usados por muita gente (podem variar conforme a base/visão do IBGE)
-AGREG_PIB_MUN = 5938  # PIB dos Municípios (geralmente contém variável de PIB per capita)
-AGREG_POP     = 6579  # População (varia por base; debug te ajuda a confirmar)
+# ✅ Confirmados nos metadados do IBGE:
+AGREG_PIB_MUN = 5938
+PIB_TOTAL_VAR = "37"     # "Produto Interno Bruto a preços correntes" (Mil Reais)  :contentReference[oaicite:2]{index=2}
 
-KEYWORDS_PIB_PC = ["per capita", "pib per capita", "produto interno bruto per capita"]
-KEYWORDS_POP    = ["população", "populacao", "população residente", "população estimada"]
+AGREG_POP     = 6579
+POP_VAR       = "9324"   # "População residente estimada"                          :contentReference[oaicite:3]{index=3}
 
-def _http_get_json(url: str, timeout: int = 25) -> dict | list:
+
+def _http_get_json(url: str, timeout: int = 25):
     r = requests.get(url, timeout=timeout)
     r.raise_for_status()
     return r.json()
+
 
 def _extract_variables_from_metadados(meta: dict | list) -> list[dict]:
     """
@@ -269,83 +271,50 @@ def _pick_variable_id(vars_list: list[dict], keywords: list[str]) -> tuple[str |
             return str(v.get("id")), "fallback: primeira variável disponível"
     return None, "nenhuma variável encontrada no metadado"
 
+
+
 def _fetch_series_agregado(agregado: int, variavel: str, anos: list[int], cod_municipios: list[int]) -> pd.DataFrame:
-    """
-    Busca série por municípios e anos.
-    Endpoint: /agregados/{ag}/periodos/{anos}/variaveis/{var}?localidades=N6[...]
-    Retorna df: cod_ibge, ano, valor
-    """
     anos_str = ",".join(map(str, sorted(set(anos))))
     locs = ",".join(map(str, cod_municipios))
     url = f"{IBGE_AGREGADOS_BASE}/{agregado}/periodos/{anos_str}/variaveis/{variavel}?localidades=N6[{locs}]"
     js = _http_get_json(url)
 
     rows = []
-    # Formato típico:
-    # [
-    #   { "id":"...", "variavel":"...", "resultados":[{"classificacoes":[],"series":[{"localidade":{"id":"3304557"...},"serie":{"2020":"123","2021":"..."}}]}]}
-    # ]
     if isinstance(js, list) and js:
         obj = js[0]
-        resultados = obj.get("resultados", [])
-        for res in resultados:
+        for res in obj.get("resultados", []):
             for serie in res.get("series", []):
                 loc_id = serie.get("localidade", {}).get("id")
-                serie_map = serie.get("serie", {})
-                for ano, val in (serie_map or {}).items():
+                serie_map = serie.get("serie", {}) or {}
+                for ano, val in serie_map.items():
                     try:
                         vnum = float(str(val).replace(".", "").replace(",", "."))
                     except Exception:
-                        try:
-                            vnum = float(val)
-                        except Exception:
-                            vnum = np.nan
+                        vnum = np.nan
                     rows.append({"cod_ibge": str(loc_id), "ano": int(ano), "valor": vnum})
 
     return pd.DataFrame(rows)
 
-@st.cache_data(show_spinner="📥 Carregando bases do IBGE via API…", ttl=60*60, max_entries=64)
-def carregar_bases_ibge_via_api(anos: list[int], municipios: list[int]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """
-    Carrega:
-      - PIB per capita (df_pib: cod_ibge, ano, pib_pc)
-      - População (df_pop: cod_ibge, ano, pop)
-    Inclui debug com variáveis detectadas e motivo.
-    """
-    debug = {}
 
-    # -------- METADADOS PIB ----------
-    meta_pib_url = f"{IBGE_AGREGADOS_BASE}/{AGREG_PIB_MUN}/metadados"
-    meta_pib = _http_get_json(meta_pib_url)
-    vars_pib = _extract_variables_from_metadados(meta_pib)
-    pib_var_id, pib_reason = _pick_variable_id(vars_pib, KEYWORDS_PIB_PC)
-    debug["pib_metadados_url"] = meta_pib_url
-    debug["pib_variaveis_detectadas"] = [{"id": v["id"], "nome": v["nome"]} for v in vars_pib][:80]
-    debug["pib_variavel_escolhida"] = {"id": pib_var_id, "motivo": pib_reason}
+@st.cache_data(show_spinner="📥 Carregando PIB e População do IBGE via API…", ttl=60*60, max_entries=64)
+def carregar_bases_ibge_via_api(anos: list[int], municipios: list[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    # PIB total (Mil Reais)
+    df_pib_total = _fetch_series_agregado(AGREG_PIB_MUN, PIB_TOTAL_VAR, anos, municipios).rename(
+        columns={"valor": "pib_total_mil"}
+    )
 
-    if pib_var_id is None:
-        raise RuntimeError("Não encontrei variável de PIB per capita no metadado do IBGE.")
+    # População estimada
+    df_pop = _fetch_series_agregado(AGREG_POP, POP_VAR, anos, municipios).rename(
+        columns={"valor": "pop"}
+    )
 
-    df_pib_raw = _fetch_series_agregado(AGREG_PIB_MUN, pib_var_id, anos, municipios)
-    df_pib = df_pib_raw.rename(columns={"valor": "pib_pc"}).copy()
+    # ✅ calcula PIB per capita corretamente (R$)
+    df = df_pib_total.merge(df_pop, on=["cod_ibge", "ano"], how="left")
+    df["pib_pc"] = np.where(df["pop"] > 0, (df["pib_total_mil"] * 1000.0) / df["pop"], np.nan)
 
-    # -------- METADADOS POP ----------
-    meta_pop_url = f"{IBGE_AGREGADOS_BASE}/{AGREG_POP}/metadados"
-    meta_pop = _http_get_json(meta_pop_url)
-    vars_pop = _extract_variables_from_metadados(meta_pop)
-    pop_var_id, pop_reason = _pick_variable_id(vars_pop, KEYWORDS_POP)
-    debug["pop_metadados_url"] = meta_pop_url
-    debug["pop_variaveis_detectadas"] = [{"id": v["id"], "nome": v["nome"]} for v in vars_pop][:80]
-    debug["pop_variavel_escolhida"] = {"id": pop_var_id, "motivo": pop_reason}
-
-    if pop_var_id is None:
-        raise RuntimeError("Não encontrei variável de População no metadado do IBGE.")
-
-    df_pop_raw = _fetch_series_agregado(AGREG_POP, pop_var_id, anos, municipios)
-    df_pop = df_pop_raw.rename(columns={"valor": "pop"}).copy()
-
-    return df_pib, df_pop, debug
-
+    # retorna só o que você precisa no app
+    df_pib = df[["cod_ibge", "ano", "pib_pc", "pib_total_mil"]].copy()
+    return df_pib, df_pop
 
 # =========================================================
 # SICONFI HELPERS
@@ -431,19 +400,60 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
         nro_habitantes = float(pop_row["pop"].sum()) if not pop_row.empty else 0.0
         pib_pc = float(pib_row["pib_pc"].sum()) if not pib_row.empty else 0.0
 
-        # se pop não vier para o ano selecionado, tenta fallback: último ano disponível para aquele município
-        if nro_habitantes == 0.0:
-            subm = df_pop[df_pop["cod_ibge"] == ente_str].sort_values("ano")
-            if not subm.empty:
-                nro_habitantes = float(subm.iloc[-1]["pop"])
+        #### FALL BACK (se não tiver dados de PIB ou População na API)
 
+        # ✅ fallback POP: último ano disponível do município
+        if nro_habitantes == 0.0:
+            sub_pop = df_pop[df_pop["cod_ibge"] == ente_str].sort_values("ano")
+            if not sub_pop.empty:
+                nro_habitantes = float(sub_pop.iloc[-1]["pop"])
+                pop_ano_usado = int(sub_pop.iloc[-1]["ano"])
+            else:
+                pop_ano_usado = int(ano)
+        else:
+            pop_ano_usado = int(ano)
+
+        # ✅ fallback PIB: último ano disponível do município
         if pib_pc == 0.0:
-            subm = df_pib[df_pib["cod_ibge"] == ente_str].sort_values("ano")
-            if not subm.empty:
-                pib_pc = float(subm.iloc[-1]["pib_pc"])
+            sub_pib = df_pib[df_pib["cod_ibge"] == ente_str].sort_values("ano")
+            if not sub_pib.empty:
+                pib_pc = float(sub_pib.iloc[-1]["pib_pc"])
+                pib_ano_usado = int(sub_pib.iloc[-1]["ano"])
+            else:
+                pib_ano_usado = int(ano)
+        else:
+            pib_ano_usado = int(ano)
 
-        if nro_habitantes == 0.0:
-            st.warning(f"Sem população IBGE para {ibge_to_nome.get(ente, ente)} (ano {ano}). Indicadores per capita podem zerar.")
+        # # Aviso (uma vez por município/ano)
+        # if pib_ano_usado != int(ano):
+        #     st.info(
+        #         f"PIB per capita do IBGE não disponível para {ano} em {ibge_to_nome.get(ente, ente)}. "
+        #         f"Usei o último ano disponível: {pib_ano_usado}."
+        #     )
+
+        # ✅ Se quiser padronizar (PIB e POP no mesmo ano do PIB):
+        if pib_ano_usado != int(ano):
+            pop_row_pib = df_pop[(df_pop["cod_ibge"] == ente_str) & (df_pop["ano"] == pib_ano_usado)]
+            if not pop_row_pib.empty:
+                nro_habitantes = float(pop_row_pib["pop"].sum())
+                pop_ano_usado = pib_ano_usado
+
+        # if nro_habitantes == 0.0:
+        #     st.warning(f"Sem população IBGE para {ibge_to_nome.get(ente, ente)} (ano {ano}). Per capita pode zerar.")
+
+        # # se pop não vier para o ano selecionado, tenta fallback: último ano disponível para aquele município
+        # if nro_habitantes == 0.0:
+        #     subm = df_pop[df_pop["cod_ibge"] == ente_str].sort_values("ano")
+        #     if not subm.empty:
+        #         nro_habitantes = float(subm.iloc[-1]["pop"])
+
+        # if pib_pc == 0.0:
+        #     subm = df_pib[df_pib["cod_ibge"] == ente_str].sort_values("ano")
+        #     if not subm.empty:
+        #         pib_pc = float(subm.iloc[-1]["pib_pc"])
+
+        # if nro_habitantes == 0.0:
+        #     st.warning(f"Sem população IBGE para {ibge_to_nome.get(ente, ente)} (ano {ano}). Indicadores per capita podem zerar.")
 
         # --------- EXTRAÇÕES SICONFI ----------
         rec_total = get_value_or_zero(df_rreo_1, 'coluna == "Até o Bimestre (c)" & cod_conta == "TotalReceitas"')
@@ -585,17 +595,18 @@ with col_b:
 
 if carregar_ibge:
     municipios = list(ibge_to_nome.keys())
-    anos = available_years[:]  # tenta carregar tudo selecionável
+    anos = available_years[:]
     try:
-        pib_df, pop_df, debug = carregar_bases_ibge_via_api(anos=anos, municipios=municipios)
+        pib_df, pop_df = carregar_bases_ibge_via_api(anos=anos, municipios=municipios)
         st.session_state.pib_df = pib_df
         st.session_state.pop_df = pop_df
-        st.session_state.ibge_debug = debug
         st.session_state.ibge_loaded = True
         st.success("✅ Bases do IBGE carregadas com sucesso!")
+        st.write("Anos PIB disponíveis:", sorted(st.session_state.pib_df["ano"].unique().tolist()))
     except Exception as e:
         st.session_state.ibge_loaded = False
         st.error(f"❌ Falha ao carregar bases do IBGE: {e}")
+
 
 if not st.session_state.ibge_loaded:
     st.warning("⚠️ Para continuar, clique em **Carregar dados do IBGE** acima.")
