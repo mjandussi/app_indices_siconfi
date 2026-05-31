@@ -4,6 +4,38 @@ import requests
 import time
 import numpy as np
 from io import BytesIO
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# =========================================================
+# SESSÃO HTTP ROBUSTA (retry + User-Agent)
+# =========================================================
+# No Streamlit Cloud o app roda em datacenter (maior latência ao IBGE) e a API
+# do IBGE é lenta/instável e às vezes rejeita clientes sem User-Agent. Por isso
+# usamos uma sessão com retry automático e cabeçalhos de navegador.
+def _build_http_session() -> requests.Session:
+    s = requests.Session()
+    retry = Retry(
+        total=4,
+        connect=4,
+        read=4,
+        backoff_factor=1.5,  # espera 0s, 1.5s, 3s, 6s... entre tentativas
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (compatible; app-indicadores-contabeis/1.0)",
+        "Accept": "application/json",
+    })
+    return s
+
+# (connect timeout, read timeout) — connect maior por causa da latência do datacenter
+HTTP_TIMEOUT = (30, 90)
+
+HTTP = _build_http_session()
 
 # =========================================================
 # CONFIG STREAMLIT
@@ -206,8 +238,8 @@ AGREG_POP     = 6579
 POP_VAR       = "9324"   # "População residente estimada"                          :contentReference[oaicite:3]{index=3}
 
 
-def _http_get_json(url: str, timeout: int = 25):
-    r = requests.get(url, timeout=timeout)
+def _http_get_json(url: str, timeout=HTTP_TIMEOUT):
+    r = HTTP.get(url, timeout=timeout)
     r.raise_for_status()
     return r.json()
 
@@ -320,8 +352,8 @@ def carregar_bases_ibge_via_api(anos: list[int], municipios: list[int]) -> tuple
 # SICONFI HELPERS
 # =========================================================
 @st.cache_data(show_spinner=False, ttl=60*30, max_entries=256)
-def _get_json(url: str, timeout: int = 15) -> dict:
-    r = requests.get(url, verify=False, timeout=timeout)
+def _get_json(url: str, timeout=HTTP_TIMEOUT) -> dict:
+    r = HTTP.get(url, verify=False, timeout=timeout)
     r.raise_for_status()
     return r.json()
 
@@ -347,28 +379,28 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
                 f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rreo?"
                 f"an_exercicio={ano}&nr_periodo=6&co_tipo_demonstrativo=RREO&no_anexo=RREO-Anexo%2001&id_ente={ente}"
             )
-            df_rreo_1 = pd.DataFrame(_get_json(link_rreo_1, timeout=20).get("items", []))
+            df_rreo_1 = pd.DataFrame(_get_json(link_rreo_1).get("items", []))
             time.sleep(0.05)
 
             link_rreo_2 = (
                 f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rreo?"
                 f"an_exercicio={ano}&nr_periodo=6&co_tipo_demonstrativo=RREO&no_anexo=RREO-Anexo%2002&id_ente={ente}"
             )
-            df_rreo_2 = pd.DataFrame(_get_json(link_rreo_2, timeout=20).get("items", []))
+            df_rreo_2 = pd.DataFrame(_get_json(link_rreo_2).get("items", []))
             time.sleep(0.05)
 
             link_rreo_3 = (
                 f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rreo?"
                 f"an_exercicio={ano}&nr_periodo=6&co_tipo_demonstrativo=RREO&no_anexo=RREO-Anexo%2003&id_ente={ente}"
             )
-            df_rreo_3 = pd.DataFrame(_get_json(link_rreo_3, timeout=20).get("items", []))
+            df_rreo_3 = pd.DataFrame(_get_json(link_rreo_3).get("items", []))
             time.sleep(0.05)
 
             link_dca_ab = (
                 f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/dca?"
                 f"an_exercicio={ano}&no_anexo=DCA-Anexo%20I-AB&id_ente={ente}"
             )
-            df_dca_ab = pd.DataFrame(_get_json(link_dca_ab, timeout=20).get("items", []))
+            df_dca_ab = pd.DataFrame(_get_json(link_dca_ab).get("items", []))
             time.sleep(0.05)
 
         except Exception as e:
