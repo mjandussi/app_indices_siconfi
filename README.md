@@ -41,10 +41,27 @@ com dados de PIB, População (IBGE) e demonstrativos do SICONFI coletados pontu
 | **Dados fiscais/contábeis** | Extração pontual do SICONFI | **API do SICONFI** (RREO e DCA), ao vivo |
 | **Cálculo dos índices** | Manual / planilha | **Automático e reprodutível** |
 | **Resultado** | Tabelas impressas no capítulo | Tabela interativa + **exportação para Excel** |
+| **Visão temporal** | Foto de um único ano (2021) | **Série histórica** ano a ano por município |
 
 > ⚠️ **Defasagem do PIB municipal:** o IBGE divulga o PIB dos municípios com alguns anos de
 > defasagem. Quando não há PIB para o ano selecionado, o app utiliza automaticamente o **último ano
 > disponível** por município e informa, de forma transparente, qual ano de referência foi usado.
+
+---
+
+## 🧭 Modos de análise (duas abas)
+
+O aplicativo é organizado em **duas abas** de navegação:
+
+- **📊 Comparação entre os 5 municípios** — reproduz a proposta do Capítulo 6: para um **ano
+  escolhido**, calcula todos os índices das cinco cidades, compara cada município à **média** da
+  amostra (variação % e classificação) e exibe ainda a transparência dos anos de referência do
+  IBGE, as extrações brutas do SICONFI/IBGE e o mapa de fórmulas de extração.
+
+- **📈 Série histórica de um município** — **evolução em relação ao livro** (que era uma "foto" de
+  2021): escolha **um** dos cinco municípios e veja como **cada índice evolui ao longo dos anos**
+  (índices nas linhas, anos nas colunas), com exportação para Excel. Permite acompanhar tendências
+  e o impacto de mudanças fiscais ano a ano — algo impossível na análise estática original.
 
 ---
 
@@ -100,12 +117,19 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-No app:
+No app (as bases de PIB e População do IBGE são carregadas **automaticamente**; use o expander
+*"⚙️ Bases de dados (IBGE)"* para conferir o status ou recarregar):
 
-1. Clique em **📥 Carregar dados do IBGE** (PIB e População).
-2. Selecione o **ano de análise** e os **municípios**.
-3. Clique em **⚙️ Gerar Análise** para calcular os índices.
-4. Consulte a tabela de resultados, a **transparência dos anos de referência** e exporte para **Excel**.
+**Aba 📊 Comparação entre os 5 municípios**
+1. Selecione o **ano de análise** e os **municípios**.
+2. Clique em **⚙️ Gerar Análise** para calcular os índices.
+3. Consulte a tabela de resultados, a **transparência dos anos de referência**, as **extrações
+   brutas** e o **mapa de fórmulas de extração**, e exporte para **Excel**.
+
+**Aba 📈 Série histórica de um município**
+1. Escolha **um** dos cinco municípios.
+2. Clique em **📈 Gerar série histórica** para montar a tabela (índices nas linhas, anos nas colunas).
+3. Exporte a série para **Excel**.
 
 ---
 

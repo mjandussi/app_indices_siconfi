@@ -784,31 +784,49 @@ with st.expander("⚙️ Bases de dados (IBGE) — status / recarregar"):
         st.session_state.ibge_loaded = False
         st.rerun()
 
-# CSS para deixar as TABS grandes e bem visíveis (navegação principal)
+# CSS para deixar as TABS como dois grandes botões de navegação (bem destacados)
 st.markdown(
     """
     <style>
+    /* lista de tabs ocupa a largura toda; remove a barrinha padrão */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        border-bottom: 2px solid rgba(255,255,255,0.08);
+        gap: 14px;
+        border-bottom: none;
     }
-    .stTabs [data-baseweb="tab"] {
-        font-size: 1.05rem;
-        font-weight: 700;
-        padding: 12px 22px;
-        border-radius: 10px 10px 0 0;
-        background: rgba(255,255,255,0.04);
+    .stTabs [data-baseweb="tab-highlight"],
+    .stTabs [data-baseweb="tab-border"] { display: none; }
+
+    /* cada tab vira um botão grande (largura igual) */
+    .stTabs [data-baseweb="tab-list"] button {
+        flex: 1;
+        justify-content: center;
+        font-size: 1.25rem;
+        font-weight: 800;
+        padding: 20px 24px;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.14);
+        transition: all .15s ease-in-out;
     }
+    .stTabs [data-baseweb="tab-list"] button:hover {
+        background: rgba(59, 130, 246, 0.14);
+        border-color: rgba(59, 130, 246, 0.55);
+        transform: translateY(-2px);
+    }
+
+    /* tab ativa: degradê azul, texto branco e sombra (diferencia do vermelho do app) */
     .stTabs [aria-selected="true"] {
-        background: rgba(255, 75, 75, 0.18);
-        color: #ff6b6b !important;
+        background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%) !important;
+        border-color: #3b82f6 !important;
+        box-shadow: 0 6px 18px rgba(37, 99, 235, 0.40);
     }
+    .stTabs [aria-selected="true"] * { color: #ffffff !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.subheader("Escolha a análise 👇")
+st.subheader("👉 Escolha a análise:")
 tab_comp, tab_hist = st.tabs([
     "📊  Comparação entre os 5 municípios",
     "📈  Série histórica de um município",
