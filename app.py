@@ -64,6 +64,9 @@ if "pop_df" not in st.session_state:
 if "fontes_table" not in st.session_state:
     st.session_state.fontes_table = pd.DataFrame()  # anos IBGE de referência usados
 
+if "siconfi_table" not in st.session_state:
+    st.session_state.siconfi_table = pd.DataFrame()  # extrações brutas SICONFI/IBGE
+
 if "ibge_debug" not in st.session_state:
     st.session_state.ibge_debug = {}           # guarda metadados/variáveis detectadas
 
@@ -226,6 +229,50 @@ formulas = {
     "H5_Grau de Amortização e refinanciamento de dívida": "(Op. Crédito / Desp. Total) x 100",
     "H6_Grau de Encargos da dívida na despesa corrente": "(Juros / Desp. Total) x 100",
 }
+
+
+# =========================================================
+# DOCUMENTAÇÃO DAS EXTRAÇÕES SICONFI/IBGE
+# (de qual relatório/anexo, coluna e cod_conta cada métrica é obtida)
+# =========================================================
+EXTRACOES_DOC = [
+    # Métrica, Relatório/Anexo, Coluna (filtro), Conta / cod_conta (filtro)
+    ("Receita Total", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "TotalReceitas"'),
+    ("IPTU", "RREO - Anexo 03", 'TOTAL (ÚLTIMOS 12 MESES)', 'conta contém "IPTU"'),
+    ("ISS", "RREO - Anexo 03", 'TOTAL (ÚLTIMOS 12 MESES)', 'conta contém "ISS"'),
+    ("Dívida Ativa", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.1.2.5.0.00.00" ou "P1.2.1.1.1.04.00"'),
+    ("Despesa Total", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "TotalDespesas"'),
+    ("Investimentos (despesa)", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "Investimentos"'),
+    ("Saúde", "RREO - Anexo 02", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (d)', 'conta == "Saúde" & cod_conta == "RREO2TotalDespesas"'),
+    ("Educação", "RREO - Anexo 02", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (d)', 'conta == "Educação" & cod_conta == "RREO2TotalDespesas"'),
+    ("Legislativo", "RREO - Anexo 02", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (d)', 'conta == "Legislativa" & cod_conta == "RREO2TotalDespesas"'),
+    ("Receita Tributária", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "ReceitaTributaria"'),
+    ("Transferências Correntes", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "TransferenciasCorrentes"'),
+    ("Ativo Circulante", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.1.0.0.0.00.00"'),
+    ("Disponível (Caixa/Bancos)", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.1.1.0.0.00.00"'),
+    ("Ativo Não Circulante", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.2.0.0.0.00.00"'),
+    ("Passivo Circulante", "DCA - Anexo I-AB", '—', 'cod_conta == "P2.1.0.0.0.00.00"'),
+    ("Passivo Não Circulante", "DCA - Anexo I-AB", '—', 'cod_conta == "P2.2.0.0.0.00.00"'),
+    ("Restituições", "DCA - Anexo I-AB", '—', 'cod_conta == "P2.1.8.8.0.00.00"'),
+    ("Estoques", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.1.5.0.0.00.00"'),
+    ("Ativo Total", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.0.0.0.0.00.00"'),
+    ("Passivo Exigível", "DCA - Anexo I-AB", '—', 'cod_conta == "P2.1.0.0.0.00.00" | "P2.2.0.0.0.00.00"'),
+    ("Imobilizado", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.2.3.0.0.00.00"'),
+    ("Investimentos (ativo)", "DCA - Anexo I-AB", '—', 'cod_conta == "P1.1.4.0.0.00.00"'),
+    ("Patrimônio Líquido", "DCA - Anexo I-AB", '—', 'cod_conta == "P2.3.0.0.0.00.00"'),
+    ("Despesa Corrente", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "DespesasCorrentes"'),
+    ("Receita Corrente", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "ReceitasCorrentes"'),
+    ("Despesa de Capital", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "DespesasDeCapital"'),
+    ("Receita de Capital", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "ReceitasDeCapital"'),
+    ("Pessoal e Encargos", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "PessoalEEncargosSociais"'),
+    ("RCL", "RREO - Anexo 03", 'TOTAL (ÚLTIMOS 12 MESES)', 'cod_conta == "RREO3ReceitaCorrenteLiquida"'),
+    ("Receita Prevista", "RREO - Anexo 01", 'PREVISÃO ATUALIZADA (a)', 'cod_conta == "TotalReceitas"'),
+    ("Despesa Fixada", "RREO - Anexo 01", 'DOTAÇÃO INICIAL (d)', 'cod_conta == "TotalDespesas"'),
+    ("Operações de Crédito", "RREO - Anexo 01", 'Até o Bimestre (c)', 'cod_conta == "ReceitasDeOperacoesDeCredito"'),
+    ("Juros e Encargos da Dívida", "RREO - Anexo 01", 'DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)', 'cod_conta == "JurosEEncargosDaDivida"'),
+    ("Habitantes (IBGE)", "IBGE/SIDRA - Agregado 6579", 'População residente estimada (var. 9324)', 'localidade N6 (município)'),
+    ("PIB per capita (IBGE)", "IBGE/SIDRA - Agregado 5938", 'PIB a preços correntes (var. 37) ÷ População', 'localidade N6 (município)'),
+]
 
 
 # =========================================================
@@ -399,6 +446,7 @@ def _valor_ano_ou_ultimo(df: pd.DataFrame, valor_col: str, cod_ibge: str, ano: i
 def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib: pd.DataFrame, df_pop: pd.DataFrame):
     resultados = []
     meta_fontes = []   # registra qual ano IBGE (PIB/pop) foi usado por município
+    meta_siconfi = []  # registra as extrações brutas do SICONFI/IBGE por município
 
     for ente in selected_entes_ids:
         try:
@@ -508,6 +556,46 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
         op_cred = get_value_or_zero(df_rreo_1, 'coluna == "Até o Bimestre (c)" & cod_conta == "ReceitasDeOperacoesDeCredito"')
         juros = get_value_or_zero(df_rreo_1, 'coluna == "DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)" & cod_conta == "JurosEEncargosDaDivida"')
 
+        # Registra as extrações brutas (auditoria/transparência) por município
+        meta_siconfi.append({
+            "Município": ibge_to_nome.get(ente, ente),
+            "Receita Total": rec_total,
+            "IPTU": iptu,
+            "ISS": iss,
+            "Dívida Ativa": div_ativa,
+            "Despesa Total": desp_total,
+            "Investimentos (despesa)": invest,
+            "Saúde": saude,
+            "Educação": educ,
+            "Legislativo": legis,
+            "Receita Tributária": rec_trib,
+            "Transferências Correntes": transf_corr,
+            "Ativo Circulante": at_circ,
+            "Disponível (Caixa/Bancos)": at_disp,
+            "Ativo Não Circulante": at_nc,
+            "Passivo Circulante": pass_circ,
+            "Passivo Não Circulante": pass_nc,
+            "Restituições": restit,
+            "Estoques": estoques,
+            "Ativo Total": ativo,
+            "Passivo Exigível": passivo,
+            "Imobilizado": imobil,
+            "Investimentos (ativo)": invest_ativo,
+            "Patrimônio Líquido": pl,
+            "Despesa Corrente": desp_corr,
+            "Receita Corrente": rec_corr,
+            "Despesa de Capital": desp_cap,
+            "Receita de Capital": rec_cap,
+            "Pessoal e Encargos": pess_enc,
+            "RCL": rcl,
+            "Receita Prevista": rec_prev,
+            "Despesa Fixada": desp_fix,
+            "Operações de Crédito": op_cred,
+            "Juros e Encargos da Dívida": juros,
+            "Habitantes (IBGE)": nro_habitantes,
+            "PIB per capita (IBGE)": pib_pc,
+        })
+
         # --------- INDICADORES ----------
         out = {
             "A1_PIB per Capita": pib_pc,
@@ -555,7 +643,7 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
         resultados.append({"Município": ente, **out})
 
     if not resultados:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     df_resultados = pd.DataFrame(resultados)
     df_resultados["Município"] = df_resultados["Município"].replace(ibge_to_nome)
@@ -587,7 +675,8 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
     tabela_final["Ano"] = ano
 
     fontes_df = pd.DataFrame(meta_fontes)
-    return tabela_final, fontes_df
+    siconfi_df = pd.DataFrame(meta_siconfi)
+    return tabela_final, fontes_df, siconfi_df
 
 
 # =========================================================
@@ -702,7 +791,7 @@ if gerar:
     if not selected_entes_ids:
         st.warning("Selecione pelo menos um município para análise.")
     else:
-        final_table, fontes_df = calculate_municipal_indices(
+        final_table, fontes_df, siconfi_df = calculate_municipal_indices(
             int(selected_year),
             selected_entes_ids,
             st.session_state.pib_df,
@@ -710,6 +799,7 @@ if gerar:
         )
         st.session_state.final_table = final_table
         st.session_state.fontes_table = fontes_df
+        st.session_state.siconfi_table = siconfi_df
         st.session_state.siconfi_loaded = True
 
 # RESULTADOS
@@ -798,6 +888,56 @@ if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
+    st.divider()
+
+    # --- Auditoria: extrações brutas do SICONFI/IBGE (insumos dos índices) ---
+    siconfi_df = st.session_state.siconfi_table.copy()
+    if not siconfi_df.empty:
+        with st.expander("🧾 Ver extrações brutas do SICONFI/IBGE (insumos dos índices)"):
+            st.caption(
+                "Valores em R$ extraídos diretamente do SICONFI (RREO e DCA) e do IBGE "
+                "(habitantes e PIB per capita), antes do cálculo dos índices per capita e dos "
+                "quocientes. Útil para auditoria e rastreabilidade do resultado."
+            )
+            # Métricas nas linhas, municípios nas colunas (espelha a tabela de índices)
+            siconfi_t = siconfi_df.set_index("Município").T
+            siconfi_t.index.name = "Métrica (SICONFI/IBGE)"
+            fmt_siconfi = {col: fmt_br_num for col in siconfi_t.columns}
+            st.dataframe(
+                siconfi_t.style.format(fmt_siconfi),
+                use_container_width=True, height=650
+            )
+            st.download_button(
+                label="📥 Exportar extrações brutas para Excel",
+                data=gerar_excel_download(siconfi_t),
+                file_name=f"Extracoes_SICONFI_IBGE_{selected_year}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+    st.divider()
+
+    # --- Documentação: de onde cada métrica é extraída no SICONFI/IBGE ---
+    with st.expander("📐 Ver fórmulas de extração no SICONFI/IBGE (relatório, coluna e conta)"):
+        st.caption(
+            "Mapeamento de cada métrica para sua origem: qual relatório/anexo, qual coluna e qual "
+            "conta (cod_conta) são usados no filtro de extração. Ex.: a métrica **Juros e Encargos da "
+            "Dívida** vem do RREO - Anexo 01, coluna *DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)*, "
+            'cod_conta *JurosEEncargosDaDivida*.'
+        )
+        doc_df = pd.DataFrame(
+            EXTRACOES_DOC,
+            columns=["Métrica", "Relatório / Anexo", "Coluna (filtro)", "Conta / cod_conta (filtro)"]
+        )
+        st.dataframe(doc_df, use_container_width=True, hide_index=True, height=650)
+        st.download_button(
+            label="📥 Exportar mapa de extrações para Excel",
+            data=gerar_excel_download(doc_df.set_index("Métrica")),
+            file_name="Mapa_Extracoes_SICONFI_IBGE.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
     st.markdown("---")
     st.subheader("Glossário e Classificação")
