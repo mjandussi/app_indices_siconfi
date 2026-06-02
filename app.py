@@ -43,7 +43,7 @@ HTTP = _build_http_session()
 st.set_page_config(
     page_title="Análise DC — 5 Maiores Cidades do RJ (Cap. 6)",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # =========================================================
@@ -680,6 +680,31 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
 
 
 # =========================================================
+# SÉRIE HISTÓRICA (um município: índices nas linhas, anos nas colunas)
+# =========================================================
+def build_historical_table(ente_id: int, nome: str, anos, df_pib: pd.DataFrame, df_pop: pd.DataFrame) -> pd.DataFrame:
+    """Calcula os índices de um município para cada ano e monta uma tabela com os
+    índices nas linhas e os anos nas colunas. Reaproveita as bases IBGE já carregadas
+    (PIB/População) — o cálculo SICONFI é feito ano a ano (com cache)."""
+    series_por_ano = {}
+    for ano in anos:
+        tab, _, _ = calculate_municipal_indices(int(ano), [ente_id], df_pib, df_pop)
+        if not tab.empty and nome in tab.columns:
+            # coluna como string ("2020"...) evita erro de formatação e ordena corretamente
+            series_por_ano[str(int(ano))] = tab[nome]
+
+    if not series_por_ano:
+        return pd.DataFrame()
+
+    hist = pd.DataFrame(series_por_ano)
+    hist = hist[sorted(hist.columns)]
+    hist.insert(0, "Interpretação", hist.index.map(interpretacoes))
+    hist.insert(1, "Fórmula", hist.index.map(formulas))
+    hist.index.name = "Índice"
+    return hist
+
+
+# =========================================================
 # UI
 # =========================================================
 st.title("📊 Análise das Demonstrações Contábeis das 5 Maiores Cidades do RJ")
@@ -729,219 +754,244 @@ recalculados de forma dinâmica, mantendo a fidelidade metodológica à pesquisa
         "Nova Iguaçu e Campos dos Goytacazes."
     )
 
-st.markdown("---")
-
-# 1) IBGE
-st.subheader("1) Carregar bases via API do IBGE (PIB per capita e População)")
-
-col_a, col_b = st.columns([1, 2])
-with col_a:
-    carregar_ibge = st.button("📥 Carregar dados do IBGE", use_container_width=True)
-with col_b:
-    st.caption("Carrega automaticamente PIB per capita e população via API do IBGE (Agregados/SIDRA).")
-
-if carregar_ibge:
-    municipios = list(ibge_to_nome.keys())
-    anos = available_years[:]
+# Carrega as bases do IBGE automaticamente (cacheadas) — sem etapa manual.
+if not st.session_state.ibge_loaded:
     try:
-        pib_df, pop_df = carregar_bases_ibge_via_api(anos=anos, municipios=municipios)
-        st.session_state.pib_df = pib_df
-        st.session_state.pop_df = pop_df
+        with st.spinner("📥 Carregando PIB e População do IBGE (Agregados/SIDRA)…"):
+            _pib_df, _pop_df = carregar_bases_ibge_via_api(
+                anos=available_years, municipios=list(ibge_to_nome.keys())
+            )
+        st.session_state.pib_df = _pib_df
+        st.session_state.pop_df = _pop_df
         st.session_state.ibge_loaded = True
-        st.success("✅ Bases do IBGE carregadas com sucesso!")
-        st.write("Anos PIB disponíveis:", sorted(st.session_state.pib_df["ano"].unique().tolist()))
     except Exception as e:
         st.session_state.ibge_loaded = False
-        st.error(f"❌ Falha ao carregar bases do IBGE: {e}")
+        st.warning(
+            "⚠️ Não foi possível carregar as bases do IBGE agora "
+            f"(os indicadores per capita podem ficar incompletos). Detalhe: {e}"
+        )
 
-
-if not st.session_state.ibge_loaded:
-    st.warning("⚠️ Para continuar, clique em **Carregar dados do IBGE** acima.")
-    # debug opcional quando falha:
-    with st.expander("🔧 Diagnóstico (metadados IBGE)"):
-        st.write("Se falhar, o motivo costuma ser o metadado/variável não bater com o texto esperado.")
-        st.write("Dica: ajuste AGREG_PIB_MUN / AGREG_POP e/ou confirme a variável no metadado.")
-    st.stop()
-
-with st.expander("🔎 Ver metadados/variáveis detectadas (IBGE)"):
-    st.json(st.session_state.ibge_debug)
-
-st.markdown("---")
-
-# 2) PARÂMETROS
-st.subheader("2) Selecionar parâmetros")
-
-c1, c2 = st.columns([1, 3])
-with c1:
-    selected_year = st.selectbox("Ano de análise", options=available_years, index=len(available_years) - 1)
-
-with c2:
-    selected_municipios_names = st.multiselect("Municípios", options=all_municipios_names, default=all_municipios_names)
-
-selected_entes_ids = [nome_to_ibge[name] for name in selected_municipios_names]
-
-st.markdown("---")
-
-# 3) GERAR
-st.subheader("3) Gerar análise (SICONFI + IBGE)")
-
-gerar = st.button("⚙️ Gerar Análise", type="primary", use_container_width=True)
-
-if gerar:
-    if not selected_entes_ids:
-        st.warning("Selecione pelo menos um município para análise.")
+# Status e recarga das bases num expander compacto (sem sidebar, preserva a largura da tabela)
+with st.expander("⚙️ Bases de dados (IBGE) — status / recarregar"):
+    if st.session_state.ibge_loaded and not st.session_state.pib_df.empty:
+        anos_pib = sorted(st.session_state.pib_df["ano"].dropna().unique().tolist())
+        st.caption("✅ PIB e População carregados — anos de PIB disponíveis: "
+                   + ", ".join(str(int(a)) for a in anos_pib))
     else:
-        final_table, fontes_df, siconfi_df = calculate_municipal_indices(
-            int(selected_year),
-            selected_entes_ids,
-            st.session_state.pib_df,
-            st.session_state.pop_df
-        )
-        st.session_state.final_table = final_table
-        st.session_state.fontes_table = fontes_df
-        st.session_state.siconfi_table = siconfi_df
-        st.session_state.siconfi_loaded = True
+        st.caption("⚠️ Bases do IBGE indisponíveis no momento.")
+    if st.button("🔄 Recarregar bases do IBGE"):
+        carregar_bases_ibge_via_api.clear()
+        st.session_state.ibge_loaded = False
+        st.rerun()
 
-# RESULTADOS
-if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
+# CSS para deixar as TABS grandes e bem visíveis (navegação principal)
+st.markdown(
+    """
+    <style>
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        border-bottom: 2px solid rgba(255,255,255,0.08);
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 1.05rem;
+        font-weight: 700;
+        padding: 12px 22px;
+        border-radius: 10px 10px 0 0;
+        background: rgba(255,255,255,0.04);
+    }
+    .stTabs [aria-selected="true"] {
+        background: rgba(255, 75, 75, 0.18);
+        color: #ff6b6b !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.subheader("Escolha a análise 👇")
+tab_comp, tab_hist = st.tabs([
+    "📊  Comparação entre os 5 municípios",
+    "📈  Série histórica de um município",
+])
+
+# =========================================================
+# TAB 1 — COMPARAÇÃO ENTRE OS 5 MUNICÍPIOS (metodologia do Capítulo 6)
+# =========================================================
+with tab_comp:
+    # 1) PARÂMETROS
+    st.subheader("1) Selecionar parâmetros")
+
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        selected_year = st.selectbox("Ano de análise", options=available_years, index=len(available_years) - 1)
+
+    with c2:
+        selected_municipios_names = st.multiselect("Municípios", options=all_municipios_names, default=all_municipios_names)
+
+    selected_entes_ids = [nome_to_ibge[name] for name in selected_municipios_names]
+
     st.markdown("---")
-    st.success("✅ Análise de índices gerada com sucesso!")
-    st.subheader(f"Resultados dos Índices para o Ano {selected_year}")
 
-    # --- Transparência: anos de referência do IBGE efetivamente usados ---
-    # O PIB municipal do IBGE é divulgado com defasagem; deixamos explícito qual
-    # ano de PIB/população foi usado em cada município para o usuário ter clareza.
-    fontes_df = st.session_state.fontes_table.copy()
-    if not fontes_df.empty:
-        ano_sel = int(selected_year)
-        houve_fallback_pib = (fontes_df["Ano PIB (IBGE)"] != ano_sel).any()
+    # 2) GERAR
+    st.subheader("2) Gerar análise (SICONFI + IBGE)")
 
-        def _observacao(row):
-            obs = []
-            if pd.isna(row["Ano PIB (IBGE)"]):
-                obs.append("PIB: sem dado disponível")
-            elif int(row["Ano PIB (IBGE)"]) != ano_sel:
-                obs.append(f"PIB: usou {int(row['Ano PIB (IBGE)'])} (último disponível)")
-            if pd.isna(row["Ano População (IBGE)"]):
-                obs.append("População: sem dado disponível")
-            elif int(row["Ano População (IBGE)"]) != ano_sel:
-                obs.append(f"População: usou {int(row['Ano População (IBGE)'])} (último disponível)")
-            return " | ".join(obs) if obs else "Dados do próprio ano selecionado"
+    gerar = st.button("⚙️ Gerar Análise", type="primary", use_container_width=True)
 
-        fontes_df["Observação"] = fontes_df.apply(_observacao, axis=1)
-
-        if houve_fallback_pib:
-            st.info(
-                f"ℹ️ **A1_PIB per Capita** — O PIB municipal do IBGE é divulgado com "
-                f"defasagem e ainda não há valor para **{ano_sel}**. Nesses casos o app "
-                f"utiliza automaticamente o **último ano de PIB disponível** por município "
-                f"(detalhado abaixo). Os demais indicadores per capita usam a população "
-                f"estimada do IBGE para {ano_sel} (ou a mais recente disponível)."
+    if gerar:
+        if not selected_entes_ids:
+            st.warning("Selecione pelo menos um município para análise.")
+        else:
+            final_table, fontes_df, siconfi_df = calculate_municipal_indices(
+                int(selected_year),
+                selected_entes_ids,
+                st.session_state.pib_df,
+                st.session_state.pop_df
             )
+            st.session_state.final_table = final_table
+            st.session_state.fontes_table = fontes_df
+            st.session_state.siconfi_table = siconfi_df
+            st.session_state.siconfi_loaded = True
 
-        with st.expander("🔎 Transparência — anos de referência dos dados do IBGE usados"):
-            st.caption(
-                "Para cada município, qual ano de PIB e de população do IBGE foi "
-                "efetivamente usado no cálculo. Quando o dado do ano selecionado ainda "
-                "não foi divulgado, recorre-se ao último ano disponível."
-            )
-            st.dataframe(
-                fontes_df[["Município", "Ano selecionado", "Ano PIB (IBGE)",
-                           "Ano População (IBGE)", "Observação"]],
-                use_container_width=True, hide_index=True
-            )
+    # RESULTADOS
+    if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
+        st.markdown("---")
+        st.success("✅ Análise de índices gerada com sucesso!")
+        st.subheader(f"Resultados dos Índices para o Ano {selected_year}")
 
-    df_show = st.session_state.final_table.copy()
+        # --- Transparência: anos de referência do IBGE efetivamente usados ---
+        # O PIB municipal do IBGE é divulgado com defasagem; deixamos explícito qual
+        # ano de PIB/população foi usado em cada município para o usuário ter clareza.
+        fontes_df = st.session_state.fontes_table.copy()
+        if not fontes_df.empty:
+            ano_sel = int(selected_year)
+            houve_fallback_pib = (fontes_df["Ano PIB (IBGE)"] != ano_sel).any()
 
-    municipios_cols = [c for c in df_show.columns if c in ibge_to_nome.values()]
-    variacoes = [c for c in df_show.columns if "Variação (%)" in c]
-    classes = [c for c in df_show.columns if "Classificação" in c]
-    textos = [c for c in ["Interpretações", "Fórmulas"] if c in df_show.columns]
+            def _observacao(row):
+                obs = []
+                if pd.isna(row["Ano PIB (IBGE)"]):
+                    obs.append("PIB: sem dado disponível")
+                elif int(row["Ano PIB (IBGE)"]) != ano_sel:
+                    obs.append(f"PIB: usou {int(row['Ano PIB (IBGE)'])} (último disponível)")
+                if pd.isna(row["Ano População (IBGE)"]):
+                    obs.append("População: sem dado disponível")
+                elif int(row["Ano População (IBGE)"]) != ano_sel:
+                    obs.append(f"População: usou {int(row['Ano População (IBGE)'])} (último disponível)")
+                return " | ".join(obs) if obs else "Dados do próprio ano selecionado"
 
-    ordem = []
-    ordem += municipios_cols
-    if "Média" in df_show.columns:
-        ordem += ["Média"]
-    ordem += variacoes + classes + textos
-    if "Ano" in df_show.columns:
-        ordem += ["Ano"]
+            fontes_df["Observação"] = fontes_df.apply(_observacao, axis=1)
 
-    df_show = df_show[ordem]
+            if houve_fallback_pib:
+                st.info(
+                    f"ℹ️ **A1_PIB per Capita** — O PIB municipal do IBGE é divulgado com "
+                    f"defasagem e ainda não há valor para **{ano_sel}**. Nesses casos o app "
+                    f"utiliza automaticamente o **último ano de PIB disponível** por município "
+                    f"(detalhado abaixo). Os demais indicadores per capita usam a população "
+                    f"estimada do IBGE para {ano_sel} (ou a mais recente disponível)."
+                )
 
-    num_cols = df_show.select_dtypes(include="number").columns
-    df_show[num_cols] = (
-        df_show[num_cols]
-        .apply(pd.to_numeric, errors="coerce")
-        .replace([np.inf, -np.inf], np.nan)
-    )
+            with st.expander("🔎 Transparência — anos de referência dos dados do IBGE usados"):
+                st.caption(
+                    "Para cada município, qual ano de PIB e de população do IBGE foi "
+                    "efetivamente usado no cálculo. Quando o dado do ano selecionado ainda "
+                    "não foi divulgado, recorre-se ao último ano disponível."
+                )
+                st.dataframe(
+                    fontes_df[["Município", "Ano selecionado", "Ano PIB (IBGE)",
+                               "Ano População (IBGE)", "Observação"]],
+                    use_container_width=True, hide_index=True
+                )
 
-    fmt = build_br_formatters(df_show)
-    styler = style_table(df_show).format(fmt)
+        df_show = st.session_state.final_table.copy()
 
-    st.dataframe(styler, use_container_width=True, height=650)
+        municipios_cols = [c for c in df_show.columns if c in ibge_to_nome.values()]
+        variacoes = [c for c in df_show.columns if "Variação (%)" in c]
+        classes = [c for c in df_show.columns if "Classificação" in c]
+        textos = [c for c in ["Interpretações", "Fórmulas"] if c in df_show.columns]
 
-    excel_file = gerar_excel_download(st.session_state.final_table)
-    st.download_button(
-        label="📥 Exportar tabela para Excel",
-        data=excel_file,
-        file_name=f"Indicadores_Municipais_{selected_year}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+        ordem = []
+        ordem += municipios_cols
+        if "Média" in df_show.columns:
+            ordem += ["Média"]
+        ordem += variacoes + classes + textos
+        if "Ano" in df_show.columns:
+            ordem += ["Ano"]
 
-    st.divider()
+        df_show = df_show[ordem]
 
-    # --- Auditoria: extrações brutas do SICONFI/IBGE (insumos dos índices) ---
-    siconfi_df = st.session_state.siconfi_table.copy()
-    if not siconfi_df.empty:
-        with st.expander("🧾 Ver extrações brutas do SICONFI/IBGE (insumos dos índices)"):
-            st.caption(
-                "Valores em R$ extraídos diretamente do SICONFI (RREO e DCA) e do IBGE "
-                "(habitantes e PIB per capita), antes do cálculo dos índices per capita e dos "
-                "quocientes. Útil para auditoria e rastreabilidade do resultado."
-            )
-            # Métricas nas linhas, municípios nas colunas (espelha a tabela de índices)
-            siconfi_t = siconfi_df.set_index("Município").T
-            siconfi_t.index.name = "Métrica (SICONFI/IBGE)"
-            fmt_siconfi = {col: fmt_br_num for col in siconfi_t.columns}
-            st.dataframe(
-                siconfi_t.style.format(fmt_siconfi),
-                use_container_width=True, height=650
-            )
-            st.download_button(
-                label="📥 Exportar extrações brutas para Excel",
-                data=gerar_excel_download(siconfi_t),
-                file_name=f"Extracoes_SICONFI_IBGE_{selected_year}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-
-    st.divider()
-
-    # --- Documentação: de onde cada métrica é extraída no SICONFI/IBGE ---
-    with st.expander("📐 Ver fórmulas de extração no SICONFI/IBGE (relatório, coluna e conta)"):
-        st.caption(
-            "Mapeamento de cada métrica para sua origem: qual relatório/anexo, qual coluna e qual "
-            "conta (cod_conta) são usados no filtro de extração. Ex.: a métrica **Juros e Encargos da "
-            "Dívida** vem do RREO - Anexo 01, coluna *DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)*, "
-            'cod_conta *JurosEEncargosDaDivida*.'
+        num_cols = df_show.select_dtypes(include="number").columns
+        df_show[num_cols] = (
+            df_show[num_cols]
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
         )
-        doc_df = pd.DataFrame(
-            EXTRACOES_DOC,
-            columns=["Métrica", "Relatório / Anexo", "Coluna (filtro)", "Conta / cod_conta (filtro)"]
-        )
-        st.dataframe(doc_df, use_container_width=True, hide_index=True, height=650)
+
+        fmt = build_br_formatters(df_show)
+        styler = style_table(df_show).format(fmt)
+
+        st.dataframe(styler, use_container_width=True, height=650)
+
+        excel_file = gerar_excel_download(st.session_state.final_table)
         st.download_button(
-            label="📥 Exportar mapa de extrações para Excel",
-            data=gerar_excel_download(doc_df.set_index("Métrica")),
-            file_name="Mapa_Extracoes_SICONFI_IBGE.xlsx",
+            label="📥 Exportar tabela para Excel",
+            data=excel_file,
+            file_name=f"Indicadores_Municipais_{selected_year}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
-    st.markdown("---")
-    st.subheader("Glossário e Classificação")
-    st.markdown(r"""
+        st.divider()
+
+        # --- Auditoria: extrações brutas do SICONFI/IBGE (insumos dos índices) ---
+        siconfi_df = st.session_state.siconfi_table.copy()
+        if not siconfi_df.empty:
+            with st.expander("🧾 Ver extrações brutas do SICONFI/IBGE (insumos dos índices)"):
+                st.caption(
+                    "Valores em R$ extraídos diretamente do SICONFI (RREO e DCA) e do IBGE "
+                    "(habitantes e PIB per capita), antes do cálculo dos índices per capita e dos "
+                    "quocientes. Útil para auditoria e rastreabilidade do resultado."
+                )
+                # Métricas nas linhas, municípios nas colunas (espelha a tabela de índices)
+                siconfi_t = siconfi_df.set_index("Município").T
+                siconfi_t.index.name = "Métrica (SICONFI/IBGE)"
+                fmt_siconfi = {col: fmt_br_num for col in siconfi_t.columns}
+                st.dataframe(
+                    siconfi_t.style.format(fmt_siconfi),
+                    use_container_width=True, height=650
+                )
+                st.download_button(
+                    label="📥 Exportar extrações brutas para Excel",
+                    data=gerar_excel_download(siconfi_t),
+                    file_name=f"Extracoes_SICONFI_IBGE_{selected_year}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+        st.divider()
+
+        # --- Documentação: de onde cada métrica é extraída no SICONFI/IBGE ---
+        with st.expander("📐 Ver fórmulas de extração no SICONFI/IBGE (relatório, coluna e conta)"):
+            st.caption(
+                "Mapeamento de cada métrica para sua origem: qual relatório/anexo, qual coluna e qual "
+                "conta (cod_conta) são usados no filtro de extração. Ex.: a métrica **Juros e Encargos da "
+                "Dívida** vem do RREO - Anexo 01, coluna *DESPESAS LIQUIDADAS ATÉ O BIMESTRE (h)*, "
+                'cod_conta *JurosEEncargosDaDivida*.'
+            )
+            doc_df = pd.DataFrame(
+                EXTRACOES_DOC,
+                columns=["Métrica", "Relatório / Anexo", "Coluna (filtro)", "Conta / cod_conta (filtro)"]
+            )
+            st.dataframe(doc_df, use_container_width=True, hide_index=True, height=650)
+            st.download_button(
+                label="📥 Exportar mapa de extrações para Excel",
+                data=gerar_excel_download(doc_df.set_index("Métrica")),
+                file_name="Mapa_Extracoes_SICONFI_IBGE.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+        st.markdown("---")
+        st.subheader("Glossário e Classificação")
+        st.markdown(r"""
 **Variação (%):** Diferença percentual do índice do município em relação à média dos municípios selecionados.
 **Classificação:**
 * **1:** Variação absoluta $\le 10\%$ da média.
@@ -952,8 +1002,64 @@ if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
 > Capítulo 6 do livro, que compara cada indicador à média (padrão) da amostra das cinco maiores
 > cidades do RJ, atribuindo perfis em faixas de variação percentual.
 """)
-else:
-    st.info("ℹ️ Selecione ano e municípios e clique em **Gerar Análise**.")
+    else:
+        st.info("ℹ️ Selecione ano e municípios e clique em **Gerar Análise**.")
+
+# =========================================================
+# TAB 2 — SÉRIE HISTÓRICA DE UM MUNICÍPIO
+# =========================================================
+with tab_hist:
+    st.subheader("Série histórica de um município")
+    st.caption(
+        "Inspirada na evolução do Capítulo 6: escolha **um** dos cinco municípios e veja como cada "
+        "índice evolui ao longo dos anos (índices nas linhas, anos nas colunas)."
+    )
+
+    col_h1, col_h2 = st.columns([2, 1])
+    with col_h1:
+        nome_hist = st.selectbox(
+            "Município (5 maiores do RJ — Cap. 6)",
+            options=all_municipios_names,
+            key="hist_mun",
+        )
+    ente_hist = nome_to_ibge[nome_hist]
+
+    st.caption(
+        f"Cada ano consulta o SICONFI (4 chamadas); a primeira geração pode levar alguns segundos "
+        f"(anos {available_years[0]}–{available_years[-1]})."
+    )
+
+    if st.button("📈 Gerar série histórica", type="primary", use_container_width=True, key="hist_btn"):
+        st.session_state["hist_table"] = build_historical_table(
+            ente_hist, nome_hist, available_years,
+            st.session_state.pib_df, st.session_state.pop_df
+        )
+        st.session_state["hist_nome"] = nome_hist
+
+    hist = st.session_state.get("hist_table", pd.DataFrame())
+    if not hist.empty:
+        st.success(f"✅ Série histórica — {st.session_state.get('hist_nome', '')}")
+
+        hist_show = hist.copy()
+        num_cols_h = hist_show.select_dtypes(include="number").columns
+        hist_show[num_cols_h] = (
+            hist_show[num_cols_h]
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+        )
+        fmt_h = build_br_formatters(hist_show)
+        st.dataframe(style_table(hist_show).format(fmt_h), use_container_width=True, height=650)
+
+        st.download_button(
+            label="📥 Exportar série histórica para Excel",
+            data=gerar_excel_download(hist),
+            file_name=f"Indices_Serie_Historica_{st.session_state.get('hist_nome', 'ente')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="hist_dl",
+        )
+    else:
+        st.info("ℹ️ Escolha o município e clique em **Gerar série histórica**.")
 
 # =========================================================
 # RODAPÉ — Créditos e referência ao livro
