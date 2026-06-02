@@ -41,7 +41,7 @@ HTTP = _build_http_session()
 # CONFIG STREAMLIT
 # =========================================================
 st.set_page_config(
-    page_title="Análise de Índices Municipais",
+    page_title="Análise DC — 5 Maiores Cidades do RJ (Cap. 6)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -60,6 +60,9 @@ if "pib_df" not in st.session_state:
     st.session_state.pib_df = pd.DataFrame()   # colunas: cod_ibge, ano, pib_pc
 if "pop_df" not in st.session_state:
     st.session_state.pop_df = pd.DataFrame()   # colunas: cod_ibge, ano, pop
+
+if "fontes_table" not in st.session_state:
+    st.session_state.fontes_table = pd.DataFrame()  # anos IBGE de referência usados
 
 if "ibge_debug" not in st.session_state:
     st.session_state.ibge_debug = {}           # guarda metadados/variáveis detectadas
@@ -189,7 +192,7 @@ interpretacoes = {
 }
 
 formulas = {
-    "A1_PIB per Capita": "PIB per capita (IBGE/SIDRA)",
+    "A1_PIB per Capita": "PIB total / População (IBGE/SIDRA) — usa o último ano disponível quando o ano selecionado ainda não foi divulgado",
     "A2_Receita Total per Capita": "Receita Total / Habitantes",
     "A3_IPTU per Capita": "IPTU / Habitantes",
     "A4_ISS per Capita": "ISS / Habitantes",
@@ -366,12 +369,36 @@ def safe_division(numerator, denominator):
     return numerator / denominator if denominator != 0 else 0.0
 
 
+def _valor_ano_ou_ultimo(df: pd.DataFrame, valor_col: str, cod_ibge: str, ano: int):
+    """
+    Retorna (valor, ano_usado) de uma série IBGE para um município.
+
+    Usa o valor do ano pedido; se ele estiver ausente, NaN ou <= 0 (ex.: PIB
+    municipal ainda não divulgado para anos recentes), cai automaticamente para
+    o ÚLTIMO ano que tenha um valor válido. Se não houver nenhum dado válido,
+    retorna (NaN, None).
+    """
+    sub = df[df["cod_ibge"] == cod_ibge].copy()
+    if sub.empty:
+        return np.nan, None
+    sub[valor_col] = pd.to_numeric(sub[valor_col], errors="coerce")
+    sub = sub[sub[valor_col].notna() & (sub[valor_col] > 0)]
+    if sub.empty:
+        return np.nan, None
+    exato = sub[sub["ano"] == int(ano)]
+    if not exato.empty:
+        return float(exato.iloc[-1][valor_col]), int(ano)
+    sub = sub.sort_values("ano")
+    return float(sub.iloc[-1][valor_col]), int(sub.iloc[-1]["ano"])
+
+
 # =========================================================
 # FUNÇÃO PRINCIPAL (SEU CÁLCULO) - AGORA USANDO df_pib/df_pop da API
 # =========================================================
 @st.cache_data(show_spinner="Buscando dados no SICONFI e calculando índices…", ttl=60*30, max_entries=128)
 def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib: pd.DataFrame, df_pop: pd.DataFrame):
     resultados = []
+    meta_fontes = []   # registra qual ano IBGE (PIB/pop) foi usado por município
 
     for ente in selected_entes_ids:
         try:
@@ -425,67 +452,21 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
             return float(pd.to_numeric(sub[column], errors="coerce").fillna(0).sum())
 
         # --------- IBGE (API) ----------
+        # PIB e População do ano selecionado; se ausente/NaN/<=0, cai automaticamente
+        # para o último ano com dado válido. O PIB municipal do IBGE é divulgado com
+        # ~2-3 anos de defasagem, então em anos recentes esse fallback é o caso normal
+        # (é o que garante que a linha A1 não fique vazia e suma da tabela).
         ente_str = str(ente)
-        pop_row = df_pop[(df_pop["cod_ibge"] == ente_str) & (df_pop["ano"] == int(ano))]
-        pib_row = df_pib[(df_pib["cod_ibge"] == ente_str) & (df_pib["ano"] == int(ano))]
+        pib_pc, pib_ano_usado = _valor_ano_ou_ultimo(df_pib, "pib_pc", ente_str, ano)
+        nro_habitantes, pop_ano_usado = _valor_ano_ou_ultimo(df_pop, "pop", ente_str, ano)
 
-        nro_habitantes = float(pop_row["pop"].sum()) if not pop_row.empty else 0.0
-        pib_pc = float(pib_row["pib_pc"].sum()) if not pib_row.empty else 0.0
-
-        #### FALL BACK (se não tiver dados de PIB ou População na API)
-
-        # ✅ fallback POP: último ano disponível do município
-        if nro_habitantes == 0.0:
-            sub_pop = df_pop[df_pop["cod_ibge"] == ente_str].sort_values("ano")
-            if not sub_pop.empty:
-                nro_habitantes = float(sub_pop.iloc[-1]["pop"])
-                pop_ano_usado = int(sub_pop.iloc[-1]["ano"])
-            else:
-                pop_ano_usado = int(ano)
-        else:
-            pop_ano_usado = int(ano)
-
-        # ✅ fallback PIB: último ano disponível do município
-        if pib_pc == 0.0:
-            sub_pib = df_pib[df_pib["cod_ibge"] == ente_str].sort_values("ano")
-            if not sub_pib.empty:
-                pib_pc = float(sub_pib.iloc[-1]["pib_pc"])
-                pib_ano_usado = int(sub_pib.iloc[-1]["ano"])
-            else:
-                pib_ano_usado = int(ano)
-        else:
-            pib_ano_usado = int(ano)
-
-        # # Aviso (uma vez por município/ano)
-        # if pib_ano_usado != int(ano):
-        #     st.info(
-        #         f"PIB per capita do IBGE não disponível para {ano} em {ibge_to_nome.get(ente, ente)}. "
-        #         f"Usei o último ano disponível: {pib_ano_usado}."
-        #     )
-
-        # ✅ Se quiser padronizar (PIB e POP no mesmo ano do PIB):
-        if pib_ano_usado != int(ano):
-            pop_row_pib = df_pop[(df_pop["cod_ibge"] == ente_str) & (df_pop["ano"] == pib_ano_usado)]
-            if not pop_row_pib.empty:
-                nro_habitantes = float(pop_row_pib["pop"].sum())
-                pop_ano_usado = pib_ano_usado
-
-        # if nro_habitantes == 0.0:
-        #     st.warning(f"Sem população IBGE para {ibge_to_nome.get(ente, ente)} (ano {ano}). Per capita pode zerar.")
-
-        # # se pop não vier para o ano selecionado, tenta fallback: último ano disponível para aquele município
-        # if nro_habitantes == 0.0:
-        #     subm = df_pop[df_pop["cod_ibge"] == ente_str].sort_values("ano")
-        #     if not subm.empty:
-        #         nro_habitantes = float(subm.iloc[-1]["pop"])
-
-        # if pib_pc == 0.0:
-        #     subm = df_pib[df_pib["cod_ibge"] == ente_str].sort_values("ano")
-        #     if not subm.empty:
-        #         pib_pc = float(subm.iloc[-1]["pib_pc"])
-
-        # if nro_habitantes == 0.0:
-        #     st.warning(f"Sem população IBGE para {ibge_to_nome.get(ente, ente)} (ano {ano}). Indicadores per capita podem zerar.")
+        # Registra, de forma transparente, qual ano de referência foi efetivamente usado
+        meta_fontes.append({
+            "Município": ibge_to_nome.get(ente, ente),
+            "Ano selecionado": int(ano),
+            "Ano PIB (IBGE)": pib_ano_usado,
+            "Ano População (IBGE)": pop_ano_usado,
+        })
 
         # --------- EXTRAÇÕES SICONFI ----------
         rec_total = get_value_or_zero(df_rreo_1, 'coluna == "Até o Bimestre (c)" & cod_conta == "TotalReceitas"')
@@ -574,13 +555,15 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
         resultados.append({"Município": ente, **out})
 
     if not resultados:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     df_resultados = pd.DataFrame(resultados)
     df_resultados["Município"] = df_resultados["Município"].replace(ibge_to_nome)
 
     df_long = df_resultados.melt(id_vars=["Município"], var_name="Índice", value_name="Valor")
-    tabela_final = df_long.pivot_table(index="Índice", columns="Município", values="Valor", aggfunc="first")
+    # dropna=False garante que linhas como A1_PIB per Capita apareçam mesmo se,
+    # excepcionalmente, não houver PIB disponível para nenhum município.
+    tabela_final = df_long.pivot_table(index="Índice", columns="Município", values="Valor", aggfunc="first", dropna=False)
 
     tabela_final["Média"] = tabela_final.mean(axis=1)
 
@@ -603,17 +586,60 @@ def calculate_municipal_indices(ano: int, selected_entes_ids: list[int], df_pib:
     tabela_final["Fórmulas"] = tabela_final.index.map(formulas)
     tabela_final["Ano"] = ano
 
-    return tabela_final
+    fontes_df = pd.DataFrame(meta_fontes)
+    return tabela_final, fontes_df
 
 
 # =========================================================
 # UI
 # =========================================================
-st.title("📊 Análise dos Indicadores Fiscais, Orçamentários e Contábeis")
-st.markdown(
-    "Esta ferramenta analisa indicadores fiscais, orçamentários e contábeis dos municípios, "
-    "com dados oficiais do **SICONFI (Tesouro Nacional)** e bases socioeconômicas do **IBGE/SIDRA via API**."
+st.title("📊 Análise das Demonstrações Contábeis das 5 Maiores Cidades do RJ")
+st.caption(
+    "Aplicativo derivado do **Capítulo 6** do livro *Governança Pública: boas práticas para o gestor público* "
+    "(Grande Editora, 2025) — versão **dinâmica e interativa** da metodologia de análise fiscal municipal."
 )
+st.markdown(
+    "Esta ferramenta analisa indicadores fiscais, orçamentários e contábeis dos cinco maiores municípios "
+    "do Estado do Rio de Janeiro, com dados oficiais do **SICONFI (Tesouro Nacional)** e bases "
+    "socioeconômicas (PIB e População) do **IBGE/SIDRA**, ambos obtidos **ao vivo via API**."
+)
+
+st.info(
+    "👥 **Autores do Capítulo 6:** Waldir Jorge Ladeira dos Santos · Yasmim da Costa Monteiro · "
+    "Bruno Campos Pereira · Marcelo Jandussi Walther de Almeida"
+)
+
+with st.expander("📖 Sobre este aplicativo — base no Capítulo 6 do livro"):
+    st.markdown(
+        """
+Este aplicativo é o **produto digital derivado do Capítulo 6** da obra:
+
+> **SANTOS**, Waldir Jorge Ladeira dos; **MONTEIRO**, Yasmim da Costa; **PEREIRA**, Bruno Campos;
+> **ALMEIDA**, Marcelo Jandussi Walther de. *Análise das Demonstrações Contábeis das cinco maiores
+> cidades do Estado do Rio de Janeiro.* In: ROSSI, Gustavo Afonso Santi; SANTOS, Waldir Jorge
+> Ladeira dos (org.). **Governança Pública: boas práticas para o gestor público**. Rio de Janeiro:
+> Grande Editora, 2025. **cap. 6, p. 210–240**. ISBN 978-65-6125-029-0.
+
+**O que muda em relação ao livro — de estático para dinâmico:**
+
+| | 📕 Capítulo 6 (livro) | 💻 Este aplicativo |
+|---|---|---|
+| **Período** | Fixo — exercício de **2021** | **Qualquer ano** disponível (seleção dinâmica) |
+| **PIB e População** | Planilha estática (IBGE, 2021) | **API do IBGE/SIDRA** (Agregados), ao vivo |
+| **Dados fiscais/contábeis** | Extração pontual do SICONFI | **API do SICONFI** (RREO e DCA), ao vivo |
+| **Cálculo dos índices** | Manual / planilha | **Automático e reprodutível** a cada execução |
+| **Resultado** | Tabelas impressas no capítulo | Tabela interativa + **exportação para Excel** |
+
+Os mesmos grupos de indicadores propostos no capítulo (receita e arrecadação, despesa e
+aplicação de recursos, liquidez, estrutura de capitais e execução orçamentária) são aqui
+recalculados de forma dinâmica, mantendo a fidelidade metodológica à pesquisa original.
+"""
+    )
+    st.caption(
+        "Cidades analisadas (IBGE): Rio de Janeiro, São Gonçalo, Duque de Caxias, "
+        "Nova Iguaçu e Campos dos Goytacazes."
+    )
+
 st.markdown("---")
 
 # 1) IBGE
@@ -676,13 +702,14 @@ if gerar:
     if not selected_entes_ids:
         st.warning("Selecione pelo menos um município para análise.")
     else:
-        final_table = calculate_municipal_indices(
+        final_table, fontes_df = calculate_municipal_indices(
             int(selected_year),
             selected_entes_ids,
             st.session_state.pib_df,
             st.session_state.pop_df
         )
         st.session_state.final_table = final_table
+        st.session_state.fontes_table = fontes_df
         st.session_state.siconfi_loaded = True
 
 # RESULTADOS
@@ -690,6 +717,49 @@ if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
     st.markdown("---")
     st.success("✅ Análise de índices gerada com sucesso!")
     st.subheader(f"Resultados dos Índices para o Ano {selected_year}")
+
+    # --- Transparência: anos de referência do IBGE efetivamente usados ---
+    # O PIB municipal do IBGE é divulgado com defasagem; deixamos explícito qual
+    # ano de PIB/população foi usado em cada município para o usuário ter clareza.
+    fontes_df = st.session_state.fontes_table.copy()
+    if not fontes_df.empty:
+        ano_sel = int(selected_year)
+        houve_fallback_pib = (fontes_df["Ano PIB (IBGE)"] != ano_sel).any()
+
+        def _observacao(row):
+            obs = []
+            if pd.isna(row["Ano PIB (IBGE)"]):
+                obs.append("PIB: sem dado disponível")
+            elif int(row["Ano PIB (IBGE)"]) != ano_sel:
+                obs.append(f"PIB: usou {int(row['Ano PIB (IBGE)'])} (último disponível)")
+            if pd.isna(row["Ano População (IBGE)"]):
+                obs.append("População: sem dado disponível")
+            elif int(row["Ano População (IBGE)"]) != ano_sel:
+                obs.append(f"População: usou {int(row['Ano População (IBGE)'])} (último disponível)")
+            return " | ".join(obs) if obs else "Dados do próprio ano selecionado"
+
+        fontes_df["Observação"] = fontes_df.apply(_observacao, axis=1)
+
+        if houve_fallback_pib:
+            st.info(
+                f"ℹ️ **A1_PIB per Capita** — O PIB municipal do IBGE é divulgado com "
+                f"defasagem e ainda não há valor para **{ano_sel}**. Nesses casos o app "
+                f"utiliza automaticamente o **último ano de PIB disponível** por município "
+                f"(detalhado abaixo). Os demais indicadores per capita usam a população "
+                f"estimada do IBGE para {ano_sel} (ou a mais recente disponível)."
+            )
+
+        with st.expander("🔎 Transparência — anos de referência dos dados do IBGE usados"):
+            st.caption(
+                "Para cada município, qual ano de PIB e de população do IBGE foi "
+                "efetivamente usado no cálculo. Quando o dado do ano selecionado ainda "
+                "não foi divulgado, recorre-se ao último ano disponível."
+            )
+            st.dataframe(
+                fontes_df[["Município", "Ano selecionado", "Ano PIB (IBGE)",
+                           "Ano População (IBGE)", "Observação"]],
+                use_container_width=True, hide_index=True
+            )
 
     df_show = st.session_state.final_table.copy()
 
@@ -732,11 +802,30 @@ if st.session_state.siconfi_loaded and not st.session_state.final_table.empty:
     st.markdown("---")
     st.subheader("Glossário e Classificação")
     st.markdown(r"""
-**Variação (%):** Diferença percentual do índice do município em relação à média dos municípios selecionados.  
+**Variação (%):** Diferença percentual do índice do município em relação à média dos municípios selecionados.
 **Classificação:**
 * **1:** Variação absoluta $\le 10\%$ da média.
 * **2:** Variação absoluta entre $10\%$ e $30\%$ da média.
 * **3:** Variação absoluta $> 30\%$ da média.
+
+> 📖 A classificação acima dialoga com a **metodologia de qualificação de perfis** proposta no
+> Capítulo 6 do livro, que compara cada indicador à média (padrão) da amostra das cinco maiores
+> cidades do RJ, atribuindo perfis em faixas de variação percentual.
 """)
 else:
     st.info("ℹ️ Selecione ano e municípios e clique em **Gerar Análise**.")
+
+# =========================================================
+# RODAPÉ — Créditos e referência ao livro
+# =========================================================
+st.markdown("---")
+st.caption(
+    "📚 **Referência:** SANTOS, W. J. L.; MONTEIRO, Y. C.; PEREIRA, B. C.; ALMEIDA, M. J. W. de. "
+    "*Análise das Demonstrações Contábeis das cinco maiores cidades do Estado do Rio de Janeiro.* "
+    "In: ROSSI, G. A. S.; SANTOS, W. J. L. (org.). **Governança Pública: boas práticas para o gestor público**. "
+    "Rio de Janeiro: Grande Editora, 2025. cap. 6, p. 210–240. ISBN 978-65-6125-029-0."
+)
+st.caption(
+    "Fontes de dados: SICONFI/Tesouro Nacional (RREO e DCA) e IBGE/SIDRA (PIB e População) — via API. "
+    "Aplicativo de uso educacional e de apoio à gestão fiscal municipal."
+)
